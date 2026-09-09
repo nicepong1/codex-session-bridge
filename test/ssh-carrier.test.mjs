@@ -1,0 +1,25 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import {spawn} from 'node:child_process';
+import {randomUUID} from 'node:crypto';
+import {once} from 'node:events';
+import {remoteNodeCommand} from '../src/ssh-command.mjs';
+test('native remote carrier preserves full-duplex Unicode bytes and closes on stdin EOF',{skip:process.platform!=='win32',timeout:20000},async t=>{
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'csb-wire-'));
+ t.after(()=>{const resolved=path.resolve(root);assert.ok(resolved.startsWith(path.resolve(os.tmpdir())+path.sep));assert.match(path.basename(resolved),/^csb-wire-/);fs.rmSync(resolved,{recursive:true,force:true})});
+ fs.mkdirSync(path.join(root,'runtime'));fs.mkdirSync(path.join(root,'src'));
+ fs.copyFileSync(process.execPath,path.join(root,'runtime','node.exe'));
+ fs.writeFileSync(path.join(root,'package.json'),JSON.stringify({version:'0.18.0',type:'module'}));
+ fs.writeFileSync(path.join(root,'src','host-doctor.mjs'),"process.stdin.on('data',data=>process.stdout.write(data));process.stdin.on('end',()=>process.exit(0));");
+ const p={version:1,id:randomUUID(),label:'Carrier test',hostname:'192.0.2.10',username:'example',port:22,identityFile:'',remoteInstallPath:root};
+ const command=remoteNodeCommand(p,'host-doctor.mjs'),inner=command.slice('cmd.exe /d /v:off /s /c '.length);
+ const child=spawn('cmd.exe',['/d','/v:off','/s','/c',inner],{windowsHide:true,windowsVerbatimArguments:true,stdio:['pipe','pipe','pipe']});
+ t.after(()=>{if(child.exitCode==null)child.kill()});const exit=once(child,'exit');let output=Buffer.alloc(0),stderr='';
+ child.stdout.on('data',data=>output=Buffer.concat([output,data]));child.stderr.on('data',data=>stderr+=data);
+ const bytes=Buffer.from('연결 확인 😀\nsecond frame\n');child.stdin.write(bytes);
+ const deadline=Date.now()+15000;while(output.length<bytes.length&&Date.now()<deadline&&child.exitCode==null)await new Promise(r=>setTimeout(r,30));
+ assert.deepEqual(output,bytes,stderr);child.stdin.end();const [code]=await exit;assert.equal(code,0,stderr);assert.deepEqual(output,bytes);
+});

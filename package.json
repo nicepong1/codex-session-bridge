@@ -1,0 +1,20 @@
+{
+  "name": "codex-session-bridge",
+  "version": "0.18.0",
+  "private": true,
+  "type": "module",
+  "description": "Connect a Windows Codex desktop to the same tasks on another Windows PC.",
+  "license": "MIT",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "setup": "node src/setup.mjs",
+    "doctor": "node src/doctor.mjs",
+    "audit": "node scripts/audit-release.mjs"
+  },
+  "dependencies": {
+    "ws": "8.21.3"
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "bridgeVersion": "0.18.0",
+  "platform": "win32",
+  "architecture": "x64",
+  "clientAppVersions": [
+    "26.901.5280.0",
+    "26.901.6511.0"
+  ],
+  "hostAppVersions": [
+    "26.901.5280.0",
+    "26.901.6511.0"
+  ],
+  "hostCliVersions": [
+    "codex-cli 0.153.4"
+  ],
+  "unknownVersionPolicy": "block",
+  "note": "Private desktop IPC is version-specific. A release update and validation are required for additional builds. Do not edit this manifest to bypass a mismatch."
+}

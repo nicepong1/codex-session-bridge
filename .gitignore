@@ -1,0 +1,16 @@
+node_modules/
+dist/
+runtime/
+bin/*.exe
+reports/
+checkpoints/
+.research/
+*.log
+*.zip
+*.lnk
+connection.json
+known_hosts
+selected.json
+host.json
+client.json
+release-files.json

@@ -1,3 +1,9 @@
+function Enter-GpuBridgeLauncherLock {
+  param([Parameter(Mandatory=$true)][Threading.Mutex]$Mutex)
+  try {return $Mutex.WaitOne(0)}
+  catch [Threading.AbandonedMutexException] {return $true}
+}
+
 function Read-GpuBridgeReport {
   param([Parameter(Mandatory=$true)][string]$Path)
   for($bridgeReadAttempt=0;$bridgeReadAttempt -lt 3;$bridgeReadAttempt++){
@@ -100,14 +106,24 @@ public static class GpuBridgeWindow {
   return [pscustomobject]@{windowFound=$true;foreground=$bridgeFocused}
 }
 
+function Get-GpuBridgeEndpointPath {
+  param([Parameter(Mandatory=$true)]$Report,[Parameter(Mandatory=$true)][int]$HubProcessId)
+  $bridgeEndpoint=[IO.Path]::GetFullPath($Report.endpointFile)
+  $bridgeName=[IO.Path]::GetFileName($bridgeEndpoint)
+  $bridgeExpected=Join-Path ([IO.Path]::GetTempPath()) $bridgeName
+  # Older live versions used PID only. New runs include a nonce for PID reuse.
+  if($HubProcessId -le 0 -or $bridgeEndpoint -ne [IO.Path]::GetFullPath($bridgeExpected) -or
+    $bridgeName -notmatch ('^codex-gpu-guard-endpoint-'+$HubProcessId+'(?:-[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12})?\.json$')){throw 'Unexpected guard endpoint file'}
+  return $bridgeEndpoint
+}
+
 function Restore-GpuBridgeWindow {
   param([Parameter(Mandatory=$true)][string]$Root,[Parameter(Mandatory=$true)]$Instance,[string]$ThreadId,[string]$InstallationRoot=$Root)
   $bridgeReport=Read-GpuBridgeReport -Path (Join-Path $Root $Instance.report)
   $bridgeRunner=Get-CimInstance Win32_Process -Filter ('ProcessId = '+[int]$Instance.pid)
   $bridgeApp=Get-CimInstance Win32_Process -Filter ('ProcessId = '+[int]$Instance.appPid)
   if(!(Test-GpuBridgeApp $bridgeReport $bridgeRunner $bridgeApp $Instance.report)){throw 'Isolated app changed before window restoration'}
-  $bridgeEndpointPath=Join-Path ([IO.Path]::GetTempPath()) ('codex-gpu-guard-endpoint-'+$Instance.pid+'.json')
-  if([IO.Path]::GetFullPath($bridgeReport.endpointFile) -ne [IO.Path]::GetFullPath($bridgeEndpointPath)){throw 'Unexpected guard endpoint file'}
+  $bridgeEndpointPath=Get-GpuBridgeEndpointPath -Report $bridgeReport -HubProcessId $Instance.pid
   $bridgeEndpoint=Get-Content -LiteralPath $bridgeEndpointPath -Raw -Encoding UTF8 | ConvertFrom-Json
   $bridgeUri=[Uri]$bridgeEndpoint.url
   if($bridgeUri.Scheme -ne 'ws' -or $bridgeUri.Host -ne '127.0.0.1' -or $bridgeUri.Port -ne $bridgeReport.port){throw 'Unexpected guard endpoint'}

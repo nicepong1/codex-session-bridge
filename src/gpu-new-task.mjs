@@ -4,6 +4,7 @@ import {spawn} from 'node:child_process';
 import {createHash} from 'node:crypto';
 import {RpcPeer} from './json-rpc-peer.mjs';
 import {newTaskParams} from './new-task-policy.mjs';
+import {BRIDGE_VERSION} from './installed.mjs';
 const UUID=/^[a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12}$/i;
 const normalize=p=>path.win32.normalize(p).replace(/[\\/]+$/,'').toLowerCase();
 
@@ -27,7 +28,7 @@ export async function createEmptyGpuTask(cliPath, params) {
     let at;while((at=buffer.indexOf('\n'))>=0){const line=buffer.slice(0,at);buffer=buffer.slice(at+1);if(line.trim())try{rpc.accept(JSON.parse(line));}catch{rpc.close();child.kill();}}
   });
   try{
-    await rpc.request('initialize',{clientInfo:{name:'codex_session_bridge_new_task',version:'0.17.0'},capabilities:{experimentalApi:true}});
+    await rpc.request('initialize',{clientInfo:{name:'codex_session_bridge_new_task',version:BRIDGE_VERSION},capabilities:{experimentalApi:true}});
     child.stdin.write(JSON.stringify({method:'initialized'})+'\n');
     const result=await rpc.request('thread/start',params,30000);
     if(!UUID.test(result?.thread?.id??'') || result.thread.ephemeral || normalize(result.thread.cwd)!==normalize(params.cwd)) throw Error('Unexpected GPU creation result');

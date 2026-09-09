@@ -1,6 +1,37 @@
 param([ValidateSet('Client','Host','Both')][string]$Role,[switch]$NoConfigure,[switch]$NoShortcut)
 $ErrorActionPreference='Stop'
 if(![Environment]::Is64BitOperatingSystem){throw 'Windows x64 is required.'}
+# OneDrive placeholders are reparse points but do not redirect the file name.
+# Inspect the native tag: allow only normal files and Microsoft's cloud tags;
+# junctions, symbolic links and unknown reparse handlers remain rejected.
+if(!('BridgeInstallReparse' -as [type])){
+ Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public static class BridgeInstallReparse {
+  [StructLayout(LayoutKind.Sequential, CharSet=CharSet.Unicode)]
+  struct FindData {
+    public uint attributes;
+    public System.Runtime.InteropServices.ComTypes.FILETIME created, accessed, written;
+    public uint sizeHigh, sizeLow, tag, reserved;
+    [MarshalAs(UnmanagedType.ByValTStr, SizeConst=260)] public string name;
+    [MarshalAs(UnmanagedType.ByValTStr, SizeConst=14)] public string alternate;
+  }
+  [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)]
+  static extern IntPtr FindFirstFileW(string path, out FindData data);
+  [DllImport("kernel32.dll")] static extern bool FindClose(IntPtr handle);
+  public static bool IsLinkTag(uint attributes, uint tag) {
+    return (attributes & 0x400u)!=0 && (tag & 0xffff0fffu)!=0x9000001au;
+  }
+  public static bool IsLinked(string path) {
+    FindData data; IntPtr handle=FindFirstFileW(path, out data);
+    if(handle==new IntPtr(-1)) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+    try { return IsLinkTag(data.attributes, data.tag); }
+    finally { FindClose(handle); }
+  }
+}
+'@
+}
 if(!$Role){
   Write-Host 'Codex Session Bridge: 1 = Client (laptop), 2 = Host (work PC), 3 = Both'
   $bridgeChoice=Read-Host 'Choose 1, 2 or 3'
@@ -16,39 +47,29 @@ foreach($bridgeFile in $bridgeFiles){
   if($bridgeFile.path -notmatch '^[A-Za-z0-9_.@/-]+$' -or $bridgeFile.path.StartsWith('/') -or @($bridgeFile.path.Split('/')) -contains '..' -or $bridgeSeen.ContainsKey($bridgeFile.path)){throw 'Invalid release file path'}
   $bridgeSeen[$bridgeFile.path]=$true
   $bridgeSource=Join-Path $PSScriptRoot $bridgeFile.path
-  if(!(Test-Path -LiteralPath $bridgeSource -PathType Leaf) -or (Get-Item -LiteralPath $bridgeSource).Attributes -band [IO.FileAttributes]::ReparsePoint){throw ('Missing or linked release file: '+$bridgeFile.path)}
+  if(!(Test-Path -LiteralPath $bridgeSource -PathType Leaf) -or [BridgeInstallReparse]::IsLinked($bridgeSource)){throw ('Missing or linked release file: '+$bridgeFile.path)}
   if((Get-FileHash -LiteralPath $bridgeSource -Algorithm SHA256).Hash.ToLowerInvariant() -ne $bridgeFile.sha256){throw ('Release checksum failed: '+$bridgeFile.path)}
 }
-foreach($bridgeRequired in @('runtime/node.exe','bin/codex-gpu-guard.exe','package.json','src/desktop-hub.mjs','src/guarded-gpu-worker.mjs','node_modules/ws/package.json')){if(!$bridgeSeen.ContainsKey($bridgeRequired)){throw ('Incomplete release: '+$bridgeRequired)}}
+foreach($bridgeRequired in @('runtime/node.exe','bin/codex-gpu-guard.exe','package.json','src/desktop-hub.mjs','src/guarded-gpu-worker.mjs','src/install-files.ps1','node_modules/ws/package.json')){if(!$bridgeSeen.ContainsKey($bridgeRequired)){throw ('Incomplete release: '+$bridgeRequired)}}
+. (Join-Path $PSScriptRoot 'src\install-files.ps1')
+$bridgeInstallerLock=[Threading.Mutex]::new($false,('Global\CodexSessionBridgeInstaller-'+[Security.Principal.WindowsIdentity]::GetCurrent().User.Value))
+$bridgeOwnsInstallerLock=$false
+try {
+try{$bridgeOwnsInstallerLock=$bridgeInstallerLock.WaitOne(0)}catch [Threading.AbandonedMutexException]{$bridgeOwnsInstallerLock=$true}
+if(!$bridgeOwnsInstallerLock){throw 'Another installer is running for this Windows user.'}
 $bridgeHash=(Get-FileHash -LiteralPath $bridgeManifestPath -Algorithm SHA256).Hash.Substring(0,12).ToLowerInvariant()
 $bridgeInstallBase=Join-Path $env:LOCALAPPDATA 'Programs\CodexSessionBridge'
 $bridgeInstall=Join-Path $bridgeInstallBase ('versions\0.18.0-'+$bridgeHash)
-if(Test-Path -LiteralPath $bridgeInstall){
-  foreach($bridgeFile in $bridgeFiles){$bridgeExisting=Join-Path $bridgeInstall $bridgeFile.path;if(!(Test-Path -LiteralPath $bridgeExisting) -or (Get-FileHash -LiteralPath $bridgeExisting -Algorithm SHA256).Hash.ToLowerInvariant() -ne $bridgeFile.sha256){throw 'Existing installation differs. Preserve it and use a new release; do not overwrite a running installation.'}}
-}else{
-  New-Item -ItemType Directory -Path $bridgeInstall -Force|Out-Null
-  foreach($bridgeFile in $bridgeFiles){
-    $bridgeDestination=Join-Path $bridgeInstall $bridgeFile.path
-    New-Item -ItemType Directory -Path ([IO.Path]::GetDirectoryName($bridgeDestination)) -Force|Out-Null
-    Copy-Item -LiteralPath (Join-Path $PSScriptRoot $bridgeFile.path) -Destination $bridgeDestination
-  }
-  Copy-Item -LiteralPath $bridgeManifestPath -Destination (Join-Path $bridgeInstall 'release-files.json')
-}
 $bridgeData=Join-Path $env:LOCALAPPDATA 'CodexSessionBridge'
+Install-BridgeFiles -Source $PSScriptRoot -Destination $bridgeInstall -Files $bridgeFiles -DataDirectory $bridgeData
 New-Item -ItemType Directory -Path $bridgeData -Force|Out-Null
-function Save-BridgeInstallPointer([string]$Name){
-  $bridgeFile=Join-Path $bridgeData $Name
-  if(Test-Path -LiteralPath $bridgeFile){Copy-Item -LiteralPath $bridgeFile -Destination ($bridgeFile+'.backup-'+[Guid]::NewGuid().ToString())}
-  $bridgePointer=@{version=1;release='0.18.0';installPath=$bridgeInstall}|ConvertTo-Json
-  [IO.File]::WriteAllText($bridgeFile,$bridgePointer,[Text.UTF8Encoding]::new($false))
-}
 if($Role -eq 'Host' -or $Role -eq 'Both'){
-  Save-BridgeInstallPointer 'host.json'
+  Save-BridgeInstallPointer (Join-Path $bridgeData 'host.json') $bridgeInstall
   Write-Host 'Host installed. Keep the official Codex app signed in. OpenSSH Server and Tailscale must already be configured.'
   & (Join-Path $bridgeInstall 'Show-HostInfo.ps1')
 }
 if($Role -eq 'Client' -or $Role -eq 'Both'){
-  Save-BridgeInstallPointer 'client.json'
+  Save-BridgeInstallPointer (Join-Path $bridgeData 'client.json') $bridgeInstall
   if(!$NoShortcut){
   $bridgeShell=New-Object -ComObject WScript.Shell
   $bridgeShortcutPath=Join-Path ([Environment]::GetFolderPath('DesktopDirectory')) 'Codex Session Bridge.lnk'
@@ -67,3 +88,4 @@ if($Role -eq 'Client' -or $Role -eq 'Both'){
   if(!$NoConfigure){& (Join-Path $bridgeInstall 'runtime\node.exe') (Join-Path $bridgeInstall 'src\setup.mjs')}
 }
 Write-Host 'Installation complete. Existing Codex tasks and account settings were preserved.'
+}finally{if($bridgeOwnsInstallerLock){$bridgeInstallerLock.ReleaseMutex()};$bridgeInstallerLock.Dispose()}

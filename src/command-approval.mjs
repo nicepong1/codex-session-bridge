@@ -53,7 +53,8 @@ export function commandApprovalFromFollower(message, policy) {
 
 export function verifyCommandApproval(session, expected) {
   if (!expected || !UUID.test(expected.ownerClientId ?? '') || session?.ownerClientId !== expected.ownerClientId ||
-      session.threadId !== expected.threadId || session.stale || Date.now() - session.receivedAt > 5000)
+      session.threadId !== expected.threadId || session.stale || !Number.isFinite(session.receivedAt) ||
+      Date.now() - session.receivedAt > 5000 || session.receivedAt > Date.now() + 1000)
     throw Error('GPU 승인 요청의 연결이 바뀌었습니다');
   const current = pendingCommand(session.state, expected.threadId, expected.requestId, expected.decision);
   if (current.turnId !== expected.turnId || current.itemId !== expected.itemId || current.requestHash !== expected.requestHash)

@@ -17,8 +17,8 @@ try {
   if($ProfileId -notmatch '^[a-f0-9]{8}(-[a-f0-9]{4}){3}-[a-f0-9]{12}$'){throw 'Invalid connection profile. Run Configure.cmd.'}
   $env:CSB_PROFILE_ID=$ProfileId
   $bridgeState=Join-Path $bridgeData ('clients\'+$ProfileId)
-  $bridgeLock=[Threading.Mutex]::new($false,('Local\CodexSessionBridgeLauncher-'+[Security.Principal.WindowsIdentity]::GetCurrent().User.Value))
-  if(!$bridgeLock.WaitOne(0)){return}
+  $bridgeLock=[Threading.Mutex]::new($false,('Global\CodexSessionBridgeLauncher-'+[Security.Principal.WindowsIdentity]::GetCurrent().User.Value))
+  if(!(Enter-GpuBridgeLauncherLock -Mutex $bridgeLock)){return}
   $bridgeInstance=Get-GpuBridgeInstance -Root $bridgeState
   if($bridgeInstance){
     if($bridgeInstance.starting){return}

@@ -6,7 +6,7 @@ import {StringDecoder} from 'node:string_decoder';
 import {encodeSshFrame, SshFrameDecoder} from './ssh-framing.mjs';
 import {RpcPeer} from './json-rpc-peer.mjs';
 import {readRoute, hubReadRoute, UUID} from './guard-policy.mjs';
-import {installedDesktop, discoverCli, TESTED_APP_VERSION} from './installed.mjs';
+import {installedDesktop, discoverCli, TESTED_APP_VERSION, BRIDGE_VERSION} from './installed.mjs';
 import {observeSession} from '../diagnostics/observe-session.mjs';
 import {TaskActivation} from './task-activation.mjs';
 import {PersistentTaskOpener} from './persistent-task-opener.mjs';
@@ -76,7 +76,7 @@ function finish(code) {
 }
 async function initialize(params) {
   if (initialized) return initialized;
-  if (!initializing) initializing = rpc.request('initialize', params ?? {clientInfo: {name: 'codex_session_bridge', version: '0.5.0'}, capabilities: {experimentalApi: true}}).then(result => {
+  if (!initializing) initializing = rpc.request('initialize', params ?? {clientInfo: {name: 'codex_session_bridge', version: BRIDGE_VERSION}, capabilities: {experimentalApi: true}}).then(result => {
     cli.stdin.write(JSON.stringify({method: 'initialized'}) + '\n'); initialized = result; return result;
   });
   return initializing;

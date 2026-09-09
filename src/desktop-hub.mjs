@@ -20,6 +20,8 @@ import {readProjectCatalog, projectDisplayState, orderProjectsByActivity} from '
 import {settingsFromFollower, settingsFromTurn} from './model-settings.mjs';
 import {COMMAND_APPROVAL_METHOD} from './command-approval.mjs';
 import {COMPUTER_APPROVAL_METHOD} from './computer-approval.mjs';
+import {acquireUserSingleton} from './user-singleton.mjs';
+import {BufferedJsonReport,createEndpointFile,endpointFilePath} from './runtime-files.mjs';
 
 const {values} = parseArgs({options: {report: {type: 'string'}, thread: {type: 'string'},
   seconds: {type: 'string', default: '0'}, launch: {type: 'boolean'}, 'enable-text-input': {type: 'boolean'},
@@ -40,19 +42,16 @@ if (idleAfter != null && (initialThread !== GPU_THREAD || !Number.isInteger(idle
 if (revealAfter != null && (initialThread === GPU_THREAD || !Number.isInteger(revealAfter) || revealAfter < 20 || revealAfter > 120 || revealAfter > testLimit - 10)) throw new Error('Invalid catalog visibility test');
 const desktop = installedDesktop();
 if (!desktop.testedBuild) throw new Error('Unsupported client Codex build; see docs/COMPATIBILITY.md');
-const singleton = net.createServer(socket => socket.destroy());
-await new Promise((resolve, reject) => {
-  singleton.once('error', () => reject(new Error('Another GPU connection is running; close its separate window first')));
-  singleton.listen('\\\\.\\pipe\\codex-session-bridge-gpu-guard', resolve);
-});
-const fd = fs.openSync(values.report, 'wx');
+const singleton = await acquireUserSingleton();
+const reportFile = new BufferedJsonReport(values.report);
 const report = {mode: 'hub', pid: process.pid, startedAt: new Date().toISOString(), heartbeatAt: new Date().toISOString(),
   status: 'starting', threadId: initialThread, durationSeconds: seconds, lifetimeMode: seconds === 0 ? 'until-window-closes' : 'bounded',
   inputEnabled: false, tasks: {}, catalog: [], rpc: [], submissions: [], errors: [], followerClientIds: []};
 let reportClosed = false, stopping = false, socket, clientId, server, app, ticker, lifetime, localRetry, resetTimer, dropTimer, idleTimer, idleAnnounceTimer;
 let wsClients = 0, recoverySnapshots = 0, localGeneration = 0;
-function record() { if (reportClosed) return; const text = JSON.stringify(report, null, 2); fs.writeSync(fd, text, 0, 'utf8'); fs.ftruncateSync(fd, Buffer.byteLength(text)); }
-record();
+let removeEndpoint = null;
+function record(options) { if (!reportClosed) reportFile.write(report,options); }
+record({immediate:true});
 const revealAt = revealAfter == null ? 0 : Date.now() + revealAfter * 1000;
 if (revealAfter != null) report.catalogVisibilityTest = {threadId: GPU_THREAD, revealAt: new Date(revealAt).toISOString(), scope: 'Existing stored test row hidden then revealed; no new task or prompt'};
 const hub = new TaskHub({seconds, allowActivation: true, allowNewTasks:Boolean(values['enable-text-input']), allowCommandApprovals:Boolean(values['enable-text-input']), allowComputerApprovals:Boolean(values['enable-text-input']), allowProjectCreation: Boolean(values.launch), allowModelSettings: Boolean(values.launch), mapGpuPaths: true, prefetchHistory: true, refreshCatalog: true,
@@ -195,7 +194,9 @@ async function stop() {
   hub.close(); for (const task of hub.tasks.values()) syncTask(task);
   socket?.destroy(); await server?.close(); await new Promise(resolve => singleton.close(resolve));
   if (app?.exitCode == null) app?.kill();
-  report.status = 'stopped'; report.inputEnabled = false; report.endedAt = new Date().toISOString(); record(); reportClosed = true; fs.closeSync(fd);
+  try { removeEndpoint?.(); } catch { report.errors.push({reason:'Guard endpoint cleanup failed'}); }
+  report.status = 'stopped'; report.inputEnabled = false; report.endedAt = new Date().toISOString(); reportClosed = true;
+  if(!await reportFile.close(report))console.error('Final diagnostic report could not be saved');
 }
 hub.on('snapshot', task => { if (!stopping) { publish(task); if (!task.policy.followers.size && task.policy.online) announce(task); record(); } });
 hub.on('contact', () => { report.lastGpuContactAt = new Date().toISOString(); });
@@ -268,7 +269,7 @@ hub.on('opener', event => {
   record();
 });
 hub.on('taskError', event => { report.errors.push({...event, at: new Date().toISOString()}); report.errors = report.errors.slice(-50); record(); });
-hub.on('connection', state => { if (stopping) return; report.connection = {...state, changedAt: new Date().toISOString()}; record(); });
+hub.on('connection', state => { if (stopping) return; report.connection = {...state, changedAt: new Date().toISOString()}; record({immediate:true}); });
 try {
   server = await startGuardServer({read: (method, params, context) => hub.read(method, params, context), route: desktopHubRoute,
     onRequest: event => { report.rpc.push({...event, at: new Date().toISOString()}); report.rpc = report.rpc.slice(-500); record(); },
@@ -303,9 +304,10 @@ try {
     app.on('exit', () => { if (!stopping) stop().catch(() => {}); });
     report.appPid = app.pid; report.profilePath = profile;
   }
-  const endpointFile = path.join(os.tmpdir(), 'codex-gpu-guard-endpoint-' + process.pid + '.json');
-  fs.writeFileSync(endpointFile, JSON.stringify({url: server.url}), {flag: 'wx', mode: 0o600}); report.endpointFile = endpointFile;
+  const endpointFile = endpointFilePath(os.tmpdir());
+  removeEndpoint = createEndpointFile(endpointFile,server.url); report.endpointFile = endpointFile;
   ticker = setInterval(() => {
+    const previousStatus=report.status;
     report.heartbeatAt = new Date().toISOString();
     report.status = hub.connection.online ? clientId ? 'guard-ready' : 'desktop-reconnecting' : hub.connection.blocked ? 'blocked' : 'reconnecting';
     for (const task of hub.tasks.values()) {
@@ -314,7 +316,7 @@ try {
       if (task.policy.online && (wasEnabled !== canWrite(task) || (report.localReconnects && recoverySnapshots < 15))) { task.policy.revision++; publish(task); }
       if (task.policy.online && !task.policy.followers.size && Date.now() - task.lastUsed < 30000) announce(task);
     }
-    recoverySnapshots++; record();
+    recoverySnapshots++; record({immediate:previousStatus!==report.status});
   }, 3000);
   if (seconds > 0) lifetime = setTimeout(() => stop().catch(() => {}), seconds * 1000);
   if (dropAfter != null) dropTimer = setTimeout(() => { report.sshLossInjectedAt = new Date().toISOString(); record(); hub.connection.disconnectForTest(); }, dropAfter * 1000);

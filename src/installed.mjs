@@ -3,6 +3,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 
 export const compatibility=JSON.parse(fs.readFileSync(new URL('../compatibility.json',import.meta.url),'utf8'));
+export const BRIDGE_VERSION=JSON.parse(fs.readFileSync(new URL('../package.json',import.meta.url),'utf8')).version;
 export const TESTED_APP_VERSION = compatibility.hostAppVersions[0];
 export function desktopFromPaths(paths,role='client'){
   if(!['client','host'].includes(role))throw Error('Invalid computer role');

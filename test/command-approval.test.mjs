@@ -36,6 +36,7 @@ test('approval only accepts the connected follower and exact active command requ
 test('fresh GPU validation rejects changed owner, command, turn, missing request and stale snapshots',()=>{
   const {session,approval}=fixture();assert.equal(verifyCommandApproval(session,approval).decision,'accept');
   for(const change of [{ownerClientId:randomUUID()},{stale:true},{receivedAt:Date.now()-6000},
+    {receivedAt:NaN},{receivedAt:Infinity},{receivedAt:undefined},{receivedAt:Date.now()+60000},
     {state:{...session.state,requests:[]}},{state:{...session.state,turns:[]}}])
     assert.throws(()=>verifyCommandApproval({...session,...change},approval));
   session.state.requests[0].params.command='different command';assert.throws(()=>verifyCommandApproval(session,approval),/변경/);

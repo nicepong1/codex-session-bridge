@@ -1,7 +1,7 @@
 import {installedDesktop,discoverCli} from './installed.mjs';
 import {DesktopIpc} from './ipc.mjs';
 const desktop=installedDesktop('host');
-const report={bridgeVersion:'0.18.0',platform:process.platform,architecture:process.arch,appVersions:desktop.versions??[],appCompatible:desktop.testedBuild===true,cliCompatible:false,ipcReady:false};
+const report={bridgeVersion:'0.18.1',platform:process.platform,architecture:process.arch,appVersions:desktop.versions??[],appCompatible:desktop.testedBuild===true,cliCompatible:false,ipcReady:false};
 try{const cli=discoverCli();report.cliVersion=cli.version;report.cliCompatible=true}catch{report.cliError='Compatible official CLI cache not found'}
 const ipc=new DesktopIpc();
 if(report.appCompatible){try{await ipc.connect();report.ipcReady=true}catch{report.ipcError='Original Codex desktop IPC is unavailable'}finally{ipc.close()}}

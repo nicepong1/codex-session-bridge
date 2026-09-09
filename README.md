@@ -6,7 +6,7 @@
 
 > 독립적으로 개발한 실험적 도구입니다. OpenAI 공식 제품이 아니며, Codex 데스크톱의 비공개 연결 규약을 사용합니다. 현재 검증한 Windows 앱 버전만 지원합니다. 설치 전 [호환성 표](docs/COMPATIBILITY.md)를 확인하세요.
 
-**[설치 파일 다운로드](https://github.com/nicepong1/codex-session-bridge/releases/tag/v0.18.0)** · **[사용설명서](docs/USER-GUIDE.md)** · **[문제 해결](docs/TROUBLESHOOTING.md)** · **[앱 개요와 구조](docs/OVERVIEW.md)**
+**[설치 파일 다운로드](https://github.com/nicepong1/codex-session-bridge/releases/tag/v0.18.1)** · **[사용설명서](docs/USER-GUIDE.md)** · **[문제 해결](docs/TROUBLESHOOTING.md)** · **[앱 개요와 구조](docs/OVERVIEW.md)**
 
 ## 할 수 있는 일
 
@@ -30,7 +30,7 @@ Node.js와 JavaScript 의존성은 릴리스 ZIP에 포함됩니다. Codex, Tail
 
 ## 지원 범위
 
-| 항목 | 첫 공개 릴리스 0.18.0 |
+| 항목 | 릴리스 0.18.1 |
 |---|---|
 | 노트북/호스트 OS | Windows x64 |
 | 노트북 Codex 앱 | 26.901.5280.0, 26.901.6511.0 |

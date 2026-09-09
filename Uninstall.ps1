@@ -2,7 +2,7 @@ param([switch]$KeepShortcut)
 $ErrorActionPreference='Stop'
 $bridgeBase=[IO.Path]::GetFullPath((Join-Path $env:LOCALAPPDATA 'Programs\CodexSessionBridge\versions')).TrimEnd('\')+'\'
 $bridgeTarget=[IO.Path]::GetFullPath($PSScriptRoot)
-if(!$bridgeTarget.StartsWith($bridgeBase,[StringComparison]::OrdinalIgnoreCase) -or [IO.Path]::GetFileName($bridgeTarget) -notmatch '^0\.18\.0-[a-f0-9]{12}$'){throw 'Run Uninstall.ps1 from the installed version directory.'}
+if(!$bridgeTarget.StartsWith($bridgeBase,[StringComparison]::OrdinalIgnoreCase) -or [IO.Path]::GetFileName($bridgeTarget) -notmatch '^0\.18\.1-[a-f0-9]{12}$'){throw 'Run Uninstall.ps1 from the installed version directory.'}
 $bridgeRunning=@(Get-CimInstance Win32_Process|Where-Object{$_.ExecutablePath -and $_.ExecutablePath.StartsWith($bridgeTarget+'\',[StringComparison]::OrdinalIgnoreCase)})
 if($bridgeRunning.Count){throw 'Close the bridge connection and setup windows before uninstalling.'}
 $bridgeData=Join-Path $env:LOCALAPPDATA 'CodexSessionBridge'

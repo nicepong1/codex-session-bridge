@@ -6,15 +6,18 @@ New-Item -ItemType Directory -Path $bridgeSource -Force|Out-Null
 $bridgeRepo=Split-Path -Parent $PSScriptRoot
 Copy-Item -LiteralPath (Join-Path $bridgeRepo 'Install.ps1') -Destination (Join-Path $bridgeSource 'Install.ps1')
 $bridgeEntries=@()
-foreach($bridgeName in @('runtime/node.exe','bin/codex-gpu-guard.exe','package.json','src/desktop-hub.mjs','src/guarded-gpu-worker.mjs','src/install-files.ps1','node_modules/ws/package.json')){
+foreach($bridgeName in @('runtime/node.exe','bin/codex-gpu-guard.exe','package.json','src/desktop-hub.mjs','src/guarded-gpu-worker.mjs','src/install-files.ps1','src/install-context.ps1','node_modules/ws/package.json')){
  $bridgeFile=Join-Path $bridgeSource $bridgeName
  New-Item -ItemType Directory -Path ([IO.Path]::GetDirectoryName($bridgeFile)) -Force|Out-Null
  if($bridgeName -eq 'src/install-files.ps1'){Copy-Item -LiteralPath (Join-Path $bridgeRepo $bridgeName) -Destination $bridgeFile}
+ # This synthetic package isolates copy recovery from the launch context.
+ # The real context guard is tested separately and in native ZIP validation.
+ elseif($bridgeName -eq 'src/install-context.ps1'){[IO.File]::WriteAllText($bridgeFile,'function Assert-BridgeInstallerContext {}')}
  else{[IO.File]::WriteAllText($bridgeFile,'inert fixture; not executable')}
  $bridgeEntries+=@{path=$bridgeName;sha256=(Get-FileHash -LiteralPath $bridgeFile).Hash.ToLowerInvariant()}
 }
 $bridgeManifest=Join-Path $bridgeSource 'release-files.json'
-[IO.File]::WriteAllText($bridgeManifest,(@{version='0.18.2';files=$bridgeEntries}|ConvertTo-Json -Depth 4))
+[IO.File]::WriteAllText($bridgeManifest,(@{version='0.18.3';files=$bridgeEntries}|ConvertTo-Json -Depth 4))
 $bridgeHash=(Get-FileHash -LiteralPath $bridgeManifest).Hash.Substring(0,12).ToLowerInvariant()
 function Assert-Review([bool]$Condition,[string]$Message){if(!$Condition){throw $Message}}
 function Run-Installer {& (Join-Path $bridgeSource 'Install.ps1') -Role Client -NoConfigure -NoShortcut|Out-Null}
@@ -32,7 +35,7 @@ try {
  $bridgeFailed=$false;try{Run-Installer}catch{$bridgeFailed=$_.Exception.Message -match 'Injected disk copy failure'}
  Remove-Item -LiteralPath Function:\Copy-Item
  Assert-Review $bridgeFailed 'Failure injection was not reached'
- $bridgeTarget=Join-Path $env:LOCALAPPDATA ('Programs\CodexSessionBridge\versions\0.18.2-'+$bridgeHash)
+ $bridgeTarget=Join-Path $env:LOCALAPPDATA ('Programs\CodexSessionBridge\versions\0.18.3-'+$bridgeHash)
  Assert-Review (!(Test-Path -LiteralPath $bridgeTarget)) 'Partial copy became a final installation'
  Assert-Review (!(Test-Path -LiteralPath (Join-Path $env:LOCALAPPDATA 'CodexSessionBridge\client.json'))) 'Failed installation changed pointer'
  Run-Installer
@@ -56,7 +59,7 @@ try {
  $bridgeRejected=$false;try{Run-Installer}catch{$bridgeRejected=$_.Exception.Message -match 'Staged release manifest checksum failed'}
  Remove-Item -LiteralPath Function:\Copy-Item
  Assert-Review $bridgeRejected 'Damaged completion manifest was accepted'
- $bridgeTarget=Join-Path $env:LOCALAPPDATA ('Programs\CodexSessionBridge\versions\0.18.2-'+$bridgeHash)
+ $bridgeTarget=Join-Path $env:LOCALAPPDATA ('Programs\CodexSessionBridge\versions\0.18.3-'+$bridgeHash)
  Assert-Review (!(Test-Path -LiteralPath $bridgeTarget)) 'Damaged manifest reached the final directory'
  Assert-Review (!(Test-Path -LiteralPath (Join-Path $env:LOCALAPPDATA 'CodexSessionBridge\client.json'))) 'Damaged manifest changed the installed pointer'
  Assert-Review (@(Get-ChildItem -LiteralPath (Split-Path $bridgeTarget) -Directory -Force -Filter '.staging-*').Count -eq 1) 'Failed manifest copy was not preserved'
@@ -72,7 +75,7 @@ try {
 
  foreach($bridgeCase in @('legacy','unknown','changed','active','pointed','linked')){
   $env:LOCALAPPDATA=Join-Path $bridgeTestRoot $bridgeCase
-  $script:bridgeTarget=Join-Path $env:LOCALAPPDATA ('Programs\CodexSessionBridge\versions\0.18.2-'+$bridgeHash)
+  $script:bridgeTarget=Join-Path $env:LOCALAPPDATA ('Programs\CodexSessionBridge\versions\0.18.3-'+$bridgeHash)
   New-Item -ItemType Directory -Path (Join-Path $bridgeTarget 'runtime') -Force|Out-Null
   Copy-Item -LiteralPath (Join-Path $bridgeSource 'runtime\node.exe') -Destination (Join-Path $bridgeTarget 'runtime\node.exe')
   $global:bridgeReviewProcesses=if($bridgeCase -eq 'active'){@([pscustomobject]@{ExecutablePath=(Join-Path $bridgeTarget 'runtime\node.exe');CommandLine='fixture'})}else{@()}

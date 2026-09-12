@@ -19,6 +19,7 @@ import {GpuNewTasks,createEmptyGpuTask} from './gpu-new-task.mjs';
 import {turnsOf} from './state.mjs';
 import {CommandApprovalJournal, verifyCommandApproval} from './command-approval.mjs';
 import {ComputerApprovalJournal, verifyComputerApproval} from './computer-approval.mjs';
+import {PermissionsApprovalJournal, verifyPermissionsApproval} from './permissions-approval.mjs';
 import {setTimeout as delay} from 'node:timers/promises';
 
 const [threadId, duration, mode = 'session'] = process.argv.slice(2);
@@ -34,6 +35,7 @@ const rpc = new RpcPeer(message => cli.stdin.write(JSON.stringify(message) + '\n
 const models = new GpuModelSettings((method, params) => rpc.request(method, params));
 const approvals = new CommandApprovalJournal(path.join(process.env.LOCALAPPDATA, 'CodexSessionBridge', 'command-approval-journal'));
 const computerApprovals = new ComputerApprovalJournal(path.join(process.env.LOCALAPPDATA, 'CodexSessionBridge', 'computer-approval-journal'));
+const permissionsApprovals = new PermissionsApprovalJournal(path.join(process.env.LOCALAPPDATA, 'CodexSessionBridge', 'permissions-approval-journal'));
 const newTasks=new GpuNewTasks({request:(method,params)=>rpc.request(method,params),create:params=>createEmptyGpuTask(cliPath,params),
   journalDirectory:path.join(process.env.LOCALAPPDATA,'CodexSessionBridge','new-task-journal')});
 const projectWriter = new GpuProjectWriter({request: (method, params) => rpc.request(method, params),
@@ -118,17 +120,21 @@ async function handle(message) {
   }
   if (mode === 'hub' && message.method === 'shareRoots') return readGpuShareRoots(message.params?.names);
   if (mode === 'hub' && message.method === 'modelConfig') { await initialize(); return models.write(message.params); }
-  if (mode === 'hub' && ['commandApproval','computerApproval'].includes(message.method)) {
-    const computer = message.method === 'computerApproval';
+  if (mode === 'hub' && ['commandApproval','computerApproval','permissionsApproval'].includes(message.method)) {
+    const {verify,journal,reply} = {
+      commandApproval: {verify:verifyCommandApproval,journal:approvals,reply:'replyCommandApproval'},
+      computerApproval: {verify:verifyComputerApproval,journal:computerApprovals,reply:'replyComputerApproval'},
+      permissionsApproval: {verify:verifyPermissionsApproval,journal:permissionsApprovals,reply:'replyPermissionsApproval'},
+    }[message.method];
     const approval = message.params, id = approval?.threadId, watched = watches.get(id);
     if (!UUID.test(id ?? '') || !watched || watched.error || watched.disconnected || busyThreads.has(id)) throw Error('GPU not ready');
     busyThreads.add(id); let fresh;
     try {
       fresh = await observeSession(id, {allowRemoteInput: true, allowedThreadId: id});
       if (fresh.state.ownerClientId !== watched.state.ownerClientId) throw Error('GPU owner changed');
-      (computer ? verifyComputerApproval : verifyCommandApproval)(fresh.state, approval);
-      return await (computer ? computerApprovals : approvals).run(approval, async () => {
-        const result = await fresh.client[computer ? 'replyComputerApproval' : 'replyCommandApproval']({session: fresh.state, appVersion: hostAppVersion, approval});
+      verify(fresh.state, approval);
+      return await journal.run(approval, async () => {
+        const result = await fresh.client[reply]({session: fresh.state, appVersion: hostAppVersion, approval});
         if (result?.ok !== true) throw Error('GPU approval was not acknowledged');
         // The private handler can return ok even when a request disappeared.
         // Observe resolution as well; never simulate a successful local click.

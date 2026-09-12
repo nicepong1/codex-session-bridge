@@ -40,7 +40,7 @@ if(!$Role){
 $bridgeManifestPath=Join-Path $PSScriptRoot 'release-files.json'
 if(!(Test-Path -LiteralPath $bridgeManifestPath)){throw 'Use the release ZIP from GitHub, or run scripts/Build-Release.ps1 first.'}
 $bridgeManifest=Get-Content -LiteralPath $bridgeManifestPath -Raw|ConvertFrom-Json
-if($bridgeManifest.version -ne '0.18.2' -or !$bridgeManifest.files){throw 'Invalid release manifest'}
+if($bridgeManifest.version -ne '0.18.3' -or !$bridgeManifest.files){throw 'Invalid release manifest'}
 $bridgeFiles=@($bridgeManifest.files)
 $bridgeSeen=@{}
 foreach($bridgeFile in $bridgeFiles){
@@ -50,7 +50,9 @@ foreach($bridgeFile in $bridgeFiles){
   if(!(Test-Path -LiteralPath $bridgeSource -PathType Leaf) -or [BridgeInstallReparse]::IsLinked($bridgeSource)){throw ('Missing or linked release file: '+$bridgeFile.path)}
   if((Get-FileHash -LiteralPath $bridgeSource -Algorithm SHA256).Hash.ToLowerInvariant() -ne $bridgeFile.sha256){throw ('Release checksum failed: '+$bridgeFile.path)}
 }
-foreach($bridgeRequired in @('runtime/node.exe','bin/codex-gpu-guard.exe','package.json','src/desktop-hub.mjs','src/guarded-gpu-worker.mjs','src/install-files.ps1','node_modules/ws/package.json')){if(!$bridgeSeen.ContainsKey($bridgeRequired)){throw ('Incomplete release: '+$bridgeRequired)}}
+foreach($bridgeRequired in @('runtime/node.exe','bin/codex-gpu-guard.exe','package.json','src/desktop-hub.mjs','src/guarded-gpu-worker.mjs','src/install-files.ps1','src/install-context.ps1','node_modules/ws/package.json')){if(!$bridgeSeen.ContainsKey($bridgeRequired)){throw ('Incomplete release: '+$bridgeRequired)}}
+. (Join-Path $PSScriptRoot 'src\install-context.ps1')
+Assert-BridgeInstallerContext
 . (Join-Path $PSScriptRoot 'src\install-files.ps1')
 $bridgeInstallerLock=[Threading.Mutex]::new($false,('Global\CodexSessionBridgeInstaller-'+[Security.Principal.WindowsIdentity]::GetCurrent().User.Value))
 $bridgeOwnsInstallerLock=$false
@@ -59,7 +61,7 @@ try{$bridgeOwnsInstallerLock=$bridgeInstallerLock.WaitOne(0)}catch [Threading.Ab
 if(!$bridgeOwnsInstallerLock){throw 'Another installer is running for this Windows user.'}
 $bridgeHash=(Get-FileHash -LiteralPath $bridgeManifestPath -Algorithm SHA256).Hash.Substring(0,12).ToLowerInvariant()
 $bridgeInstallBase=Join-Path $env:LOCALAPPDATA 'Programs\CodexSessionBridge'
-$bridgeInstall=Join-Path $bridgeInstallBase ('versions\0.18.2-'+$bridgeHash)
+$bridgeInstall=Join-Path $bridgeInstallBase ('versions\0.18.3-'+$bridgeHash)
 $bridgeData=Join-Path $env:LOCALAPPDATA 'CodexSessionBridge'
 Install-BridgeFiles -Source $PSScriptRoot -Destination $bridgeInstall -Files $bridgeFiles -DataDirectory $bridgeData
 New-Item -ItemType Directory -Path $bridgeData -Force|Out-Null

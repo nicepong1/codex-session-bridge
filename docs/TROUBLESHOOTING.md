@@ -1,5 +1,17 @@
 # 문제 해결
 
+## 바탕 화면에서 client.json 또는 설치 정보를 찾을 수 없음
+
+Codex 같은 MSIX 앱 안의 터미널에서 설치하면, Windows가 AppData 쓰기를 앱 전용 LocalCache로 옮길 수 있습니다. 같은 사용자·같은 경로 문자열이어도 바탕 화면 Explorer에서는 파일이 보이지 않습니다. 0.18.3은 이런 실행 환경에서 설치를 완료 처리하지 않습니다.
+
+1. 릴리스 ZIP을 압축 해제하고 **Windows 파일 탐색기에서 Install.cmd를 실행**하세요. 앱 내부 터미널에서 재설치를 반복하지 마세요.
+2. 노트북은 Client, 작업 PC는 Host 역할을 선택하세요.
+3. 연결 설정이 없다면 Configure.cmd로 다시 등록하세요. 예전 설정이 필요하면 앱 전용 `LocalCache/Local/CodexSessionBridge`를 먼저 백업하세요. 인증키나 Codex 계정 데이터를 옮길 필요는 없습니다.
+4. 앱 안에서 여는 시험과 별도로, 바탕 화면 아이콘을 직접 눌러 검증하세요.
+
+Windows 동작: [Microsoft MSIX 문서](https://learn.microsoft.com/en-us/windows/msix/desktop/flexible-virtualization).
+
+
 먼저 설치 폴더의 `Diagnose.cmd`를 실행합니다. 설정을 바꾸려면 `Configure.cmd`, 호스트 정보는 호스트의 `Show-HostInfo.cmd`를 사용합니다.
 
 | 증상 | 확인할 내용 |

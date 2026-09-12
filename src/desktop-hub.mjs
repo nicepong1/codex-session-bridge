@@ -20,6 +20,7 @@ import {readProjectCatalog, projectDisplayState, orderProjectsByActivity} from '
 import {settingsFromFollower, settingsFromTurn, modelFollowerResult} from './model-settings.mjs';
 import {COMMAND_APPROVAL_METHOD} from './command-approval.mjs';
 import {COMPUTER_APPROVAL_METHOD} from './computer-approval.mjs';
+import {PERMISSIONS_APPROVAL_METHOD} from './permissions-approval.mjs';
 import {acquireUserSingleton} from './user-singleton.mjs';
 import {BufferedJsonReport,createEndpointFile,endpointFilePath} from './runtime-files.mjs';
 
@@ -54,7 +55,7 @@ function record(options) { if (!reportClosed) reportFile.write(report,options); 
 record({immediate:true});
 const revealAt = revealAfter == null ? 0 : Date.now() + revealAfter * 1000;
 if (revealAfter != null) report.catalogVisibilityTest = {threadId: GPU_THREAD, revealAt: new Date(revealAt).toISOString(), scope: 'Existing stored test row hidden then revealed; no new task or prompt'};
-const hub = new TaskHub({seconds, allowActivation: true, allowNewTasks:Boolean(values['enable-text-input']), allowCommandApprovals:Boolean(values['enable-text-input']), allowComputerApprovals:Boolean(values['enable-text-input']), allowProjectCreation: Boolean(values.launch), allowModelSettings: Boolean(values.launch), mapGpuPaths: true, prefetchHistory: true, refreshCatalog: true,
+const hub = new TaskHub({seconds, allowActivation: true, allowNewTasks:Boolean(values['enable-text-input']), allowCommandApprovals:Boolean(values['enable-text-input']), allowComputerApprovals:Boolean(values['enable-text-input']), allowPermissionsApprovals:Boolean(values['enable-text-input']), allowProjectCreation: Boolean(values.launch), allowModelSettings: Boolean(values.launch), mapGpuPaths: true, prefetchHistory: true, refreshCatalog: true,
   canRefreshCatalog: () => wsClients > 0,
   catalogFilter: rows => Date.now() < revealAt ? rows.filter(row => row.id !== GPU_THREAD) : rows});
 report.historyPrefetch = {cached: 0, queued: 0, bytes: 0, failures: [],
@@ -110,8 +111,10 @@ async function respond(message) {
   }
   try {
     if (!canWrite(task)) throw new Error('GPU에서 이 작업을 열고 연결될 때까지 기다려 주세요');
-    if ([COMMAND_APPROVAL_METHOD,COMPUTER_APPROVAL_METHOD].includes(message.method)) {
-      const result = await hub[message.method === COMPUTER_APPROVAL_METHOD ? 'approveComputer' : 'approveCommand'](message);
+    const approvalHandler = {[COMMAND_APPROVAL_METHOD]:'approveCommand', [COMPUTER_APPROVAL_METHOD]:'approveComputer',
+      [PERMISSIONS_APPROVAL_METHOD]:'approvePermissions'}[message.method];
+    if (approvalHandler) {
+      const result = await hub[approvalHandler](message);
       send({...base, resultType: 'success', result}); return;
     }
     if (message.method === 'thread-follower-update-thread-settings') {
@@ -226,6 +229,10 @@ hub.on('commandApproval', event => {
 });
 hub.on('computerApproval', event => {
   report.computerApprovals = [...(report.computerApprovals ?? []), {...event, at: new Date().toISOString()}].slice(-100); record();
+});
+hub.on('permissionsApproval', ({response,...event}) => {
+  report.permissionsApprovals = [...(report.permissionsApprovals ?? []), {...event,
+    scope:response?.scope ?? 'turn', at:new Date().toISOString()}].slice(-100); record();
 });
 hub.on('newTask',event=>{
   report.newTasks=[...(report.newTasks??[]),{...event,at:new Date().toISOString()}].slice(-100);record();

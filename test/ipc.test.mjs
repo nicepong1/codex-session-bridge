@@ -10,6 +10,7 @@ import { encodeFrame, FrameDecoder } from '../src/framing.mjs';
 import { SessionState } from '../src/state.mjs';
 import {pendingCommand,COMMAND_APPROVAL_METHOD} from '../src/command-approval.mjs';
 import {pendingComputerApproval,COMPUTER_APPROVAL_METHOD} from '../src/computer-approval.mjs';
+import {pendingPermissionsApproval,PERMISSIONS_APPROVAL_METHOD} from '../src/permissions-approval.mjs';
 
 // Isolated fake router: these tests never connect to the real Codex pipe.
 async function fixture(t, handle, options = {}) {
@@ -102,6 +103,26 @@ test('Computer Use response goes to the original GPU handler exactly once, retai
   assert.equal(received[0].version,1);assert.equal(received[0].targetClientId,owner);
   assert.deepEqual(received[0].params,{conversationId:id,requestId:79,response});
   assert.throws(()=>client.replyComputerApproval(args));
+});
+
+test('permission response targets the verified original GPU owner exactly once and preserves denied or accepted scope',async t=>{
+  const id=randomUUID(),owner=randomUUID(),turn=randomUUID(),received=[];
+  const client=await fixture(t,(message,respond)=>{if(message.type==='request'){received.push(message);respond({ok:true},owner);}},
+    {allowRemoteInput:true,allowedThreadId:id});
+  const session=new SessionState(id,owner);session.state={id,sessionId:id,turns:[{turnId:turn,status:'inProgress'}],requests:[
+    {id:76,method:'item/permissions/requestApproval',params:{threadId:id,turnId:turn,itemId:'exec-permission',cwd:'C:\\project',
+      startedAtMs:Date.now(),permissions:{network:{enabled:true}}}}]};
+  session.stale=false;session.receivedAt=Date.now();client.follow(id,owner);
+  const response={permissions:{network:{enabled:true}},scope:'turn'};
+  const approval={...pendingPermissionsApproval(session.state,id,76,response),ownerClientId:owner};
+  const args={session,approval,appVersion:'26.903.8094.0'};
+  assert.throws(()=>client.replyPermissionsApproval({...args,appVersion:'different'}));
+  assert.throws(()=>client.replyPermissionsApproval({...args,approval:{...approval,ownerClientId:randomUUID()}}));
+  assert.deepEqual(await client.replyPermissionsApproval(args),{ok:true});
+  assert.equal(received.length,1);assert.equal(received[0].method,PERMISSIONS_APPROVAL_METHOD);
+  assert.equal(received[0].version,1);assert.equal(received[0].targetClientId,owner);
+  assert.deepEqual(received[0].params,{conversationId:id,requestId:76,response});
+  assert.throws(()=>client.replyPermissionsApproval(args));
 });
 
 test('one fixed probe is delivered to the subscribed owner and cannot be retried on the connection', async t => {

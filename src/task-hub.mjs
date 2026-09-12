@@ -17,11 +17,12 @@ import {GpuPathMapper} from './gpu-path-mapper.mjs';
 import {defaultModelWrite, modelSettings, modelCondition} from './model-settings.mjs';
 import {commandApprovalFromFollower, approvalKey, sameApprovalDecision} from './command-approval.mjs';
 import {computerApprovalFromFollower} from './computer-approval.mjs';
+import {permissionsApprovalFromFollower} from './permissions-approval.mjs';
 
 export class TaskHub extends EventEmitter {
   constructor({seconds = 28800, createConnection, allowActivation = false, warmRetentionMs = 600000, maxWarmTasks = 6,
     prefetchHistory = false, createHistoryConnection, refreshCatalog = false, canRefreshCatalog = () => true,
-    catalogFilter = rows => rows, maxParkedHistories = 6, allowProjectCreation = false, allowModelSettings = false, mapGpuPaths = false, pathMapper, allowNewTasks = false, allowCommandApprovals = false, allowComputerApprovals = false} = {}) {
+    catalogFilter = rows => rows, maxParkedHistories = 6, allowProjectCreation = false, allowModelSettings = false, mapGpuPaths = false, pathMapper, allowNewTasks = false, allowCommandApprovals = false, allowComputerApprovals = false, allowPermissionsApprovals = false} = {}) {
     if (!Number.isInteger(warmRetentionMs) || warmRetentionMs < 1000 || warmRetentionMs > 600000 ||
         !Number.isInteger(maxWarmTasks) || maxWarmTasks < 0 || maxWarmTasks > 6 ||
         !Number.isInteger(maxParkedHistories) || maxParkedHistories < 0 || maxParkedHistories > 6) throw new Error('Invalid recent task retention limits');
@@ -37,6 +38,7 @@ export class TaskHub extends EventEmitter {
     this.allowNewTasks=allowNewTasks;this.newTasks=new Set();this.creations=new Map();this.firstTurns=new SubmissionRegistry();
     this.lastSelectedAt = 0; this.commandApprovals = new Map(); this.allowCommandApprovals = allowCommandApprovals;
     this.computerApprovals = new Map(); this.allowComputerApprovals = allowComputerApprovals;
+    this.permissionsApprovals = new Map(); this.allowPermissionsApprovals = allowPermissionsApprovals;
     this.metadataCache = new MetadataReadCache({onUse: event => this.emit('metadata', event)});
     this.taskListCache = new TaskListCache({onUse: event => this.emit('taskListCache', event),
       onUpdate: (result, params) => this.acceptCatalog(result, params)});
@@ -382,16 +384,19 @@ export class TaskHub extends EventEmitter {
     this.emit('modelSettings', {scope: 'task', threadId: id, ...settings, outcome: result.applied ? 'acknowledged' : 'not-applied'});
     return result;
   }
-  approveCommand(message) { return this.#approve(message, false); }
-  approveComputer(message) { return this.#approve(message, true); }
-  async #approve(message, computer) {
-    const enabled = computer ? this.allowComputerApprovals : this.allowCommandApprovals;
-    const registry = computer ? this.computerApprovals : this.commandApprovals;
-    const method = computer ? 'computerApproval' : 'commandApproval';
+  approveCommand(message) { return this.#approve(message, 'command'); }
+  approveComputer(message) { return this.#approve(message, 'computer'); }
+  approvePermissions(message) { return this.#approve(message, 'permissions'); }
+  async #approve(message, kind) {
+    const {enabled, registry, method, parse} = {
+      command: {enabled:this.allowCommandApprovals, registry:this.commandApprovals, method:'commandApproval', parse:commandApprovalFromFollower},
+      computer: {enabled:this.allowComputerApprovals, registry:this.computerApprovals, method:'computerApproval', parse:computerApprovalFromFollower},
+      permissions: {enabled:this.allowPermissionsApprovals, registry:this.permissionsApprovals, method:'permissionsApproval', parse:permissionsApprovalFromFollower},
+    }[kind];
     const task = this.tasks.get(message?.params?.conversationId);
     if (!enabled || this.closed || !this.connection.online || task?.blocked) throw Error('GPU 연결이 끊겼거나 승인 전달이 비활성화되어 선택을 보내지 않았습니다');
-    const approval = (computer ? computerApprovalFromFollower : commandApprovalFromFollower)(message, task?.policy), key = approvalKey(approval);
-    const decision = computer ? approval.response : approval.decision;
+    const approval = parse(message, task?.policy), key = approvalKey(approval);
+    const decision = kind === 'command' ? approval.decision : approval.response;
     const previous = registry.get(key);
     if (previous) {
       if (!sameApprovalDecision(previous.decision, decision)) throw Error('이미 다른 승인 선택을 전달했습니다');

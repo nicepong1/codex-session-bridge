@@ -15,6 +15,14 @@ export function readRoute(method, params, threadId = GPU_THREAD) {
   if (READS.has(method)) return {method, params: params ?? {}};
   if (method === 'thread/read' && params?.threadId === threadId)
     return {method, params: {threadId, includeTurns: Boolean(params.includeTurns)}};
+  if (method === 'thread/queue/list' && params?.threadId === threadId) {
+    const limit = params.limit ?? 100;
+    if (Array.isArray(params) || Object.keys(params).some(key => !['threadId','cursor','limit'].includes(key)) ||
+        !Number.isInteger(limit) || limit < 1 || limit > 200 ||
+        (params.cursor != null && (typeof params.cursor !== 'string' || params.cursor.length > 4096)))
+      throw Error('gpu-guard-denied: invalid queue query');
+    return {method, params: {threadId, cursor: params.cursor ?? null, limit}};
+  }
   if (method === 'thread/list') {
     // Returning the task in an archived query makes the desktop hide that same task.
     if (params?.archived === true || params?.cursor) return {local: {data: [], nextCursor: null}};
@@ -31,7 +39,7 @@ export function hubReadRoute(method, params = {}) {
     if (!UUID.test(params?.projectId ?? '')) throw new Error('gpu-guard-denied: invalid project');
     return {method, params: {projectId: params.projectId}};
   }
-  if (method === 'thread/read') {
+  if (method === 'thread/read' || method === 'thread/queue/list') {
     if (!UUID.test(params?.threadId ?? '')) throw new Error('gpu-guard-denied: invalid thread');
     return readRoute(method, params, params.threadId);
   }

@@ -7,6 +7,7 @@ import { turnsOf } from './state.mjs';
 import {modelSettings, modelTurnOverrides, modelCondition} from './model-settings.mjs';
 import {COMMAND_APPROVAL_METHOD, verifyCommandApproval} from './command-approval.mjs';
 import {COMPUTER_APPROVAL_METHOD, verifyComputerApproval} from './computer-approval.mjs';
+import {PERMISSIONS_APPROVAL_METHOD, verifyPermissionsApproval} from './permissions-approval.mjs';
 
 export const TEST_CHAT_TEXT = '테스트용으로 열어둔 채팅이야';
 
@@ -178,6 +179,17 @@ export class DesktopIpc extends EventEmitter {
     verifyComputerApproval(session, approval);
     this.#probeUsed = true;
     return this.#request(COMPUTER_APPROVAL_METHOD, {conversationId: session.threadId,
+      requestId: approval.requestId, response: approval.response},
+      {version: 1, targetClientId: session.ownerClientId, timeoutMs: 10000}).then(response => response.result);
+  }
+
+  replyPermissionsApproval({session, appVersion, approval}) {
+    if (!this.#allowRemoteInput || this.#probeUsed || !supportedHostVersion(appVersion) ||
+        session.threadId !== this.#allowedThreadId || this.#following.get(session.threadId) !== session.ownerClientId)
+      throw Error('A fresh, followed GPU owner is required for this permission approval');
+    verifyPermissionsApproval(session, approval);
+    this.#probeUsed = true;
+    return this.#request(PERMISSIONS_APPROVAL_METHOD, {conversationId: session.threadId,
       requestId: approval.requestId, response: approval.response},
       {version: 1, targetClientId: session.ownerClientId, timeoutMs: 10000}).then(response => response.result);
   }

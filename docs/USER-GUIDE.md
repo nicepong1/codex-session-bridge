@@ -32,7 +32,7 @@ ssh-add "$env:USERPROFILE\.ssh\id_ed25519"
 
 ## 3. 호스트 설치
 
-1. GitHub Releases에서 `codex-session-bridge-0.18.3-windows-x64.zip`과 `.sha256` 파일을 받습니다. ZIP의 `Get-FileHash -Algorithm SHA256` 결과를 체크섬 파일과 비교합니다.
+1. GitHub Releases에서 `codex-session-bridge-0.19.0-windows-x64.zip`과 `.sha256` 파일을 받습니다. ZIP의 `Get-FileHash -Algorithm SHA256` 결과를 체크섬 파일과 비교합니다.
 2. ZIP을 **압축 해제**합니다. 압축 파일 안에서 직접 실행하지 않습니다.
 3. `Install.cmd`를 두 번 클릭하고 `2`를 입력합니다. 프로그램은 현재 Windows 사용자의 LocalAppData에 설치됩니다.
 4. 설치 화면에 표시되는 Windows 사용자명, Tailscale 주소, `SHA256:...` 형식의 SSH 호스트 지문을 확인합니다. 다시 보려면 설치 폴더의 `Show-HostInfo.cmd`를 실행합니다.
@@ -78,4 +78,4 @@ Android에는 이 Windows 프로그램을 설치하지 않습니다. 공식 Chat
 
 제거하려면 **설치된 버전 폴더**의 `Uninstall.ps1`을 PowerShell로 실행합니다. 그 버전의 프로그램과 해당 바로가기·설치 포인터만 제거합니다. 연결 설정, SSH 키, 중복 방지 기록, Codex 계정 및 프로젝트는 보존합니다.
 
-설치 프로그램은 압축 해제 후 **Windows 파일 탐색기에서 Install.cmd를 실행**하세요. Codex 같은 MSIX 앱 내부 터미널에서는 설치 파일이 앱 전용 폴더에 저장될 수 있어 0.18.3부터 설치를 거부합니다.
+설치 프로그램은 압축 해제 후 **Windows 파일 탐색기에서 Install.cmd를 실행**하세요. Codex 같은 MSIX 앱 내부 터미널에서는 설치 파일이 앱 전용 폴더에 저장될 수 있어 0.19.0부터 설치를 거부합니다.

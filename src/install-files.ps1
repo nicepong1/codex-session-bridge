@@ -105,7 +105,7 @@ function Install-BridgeFiles([string]$Source,[string]$Destination,$Files,[string
 
 function Save-BridgeInstallPointer([string]$File,[string]$InstallPath) {
   $bridgeTemp=$File+'.tmp-'+[Guid]::NewGuid().ToString()
-  $bridgePointer=@{version=1;release='0.18.3';installPath=$InstallPath}|ConvertTo-Json
+  $bridgePointer=@{version=1;release='0.19.0';installPath=$InstallPath}|ConvertTo-Json
   try {
     [IO.File]::WriteAllText($bridgeTemp,$bridgePointer,[Text.UTF8Encoding]::new($false))
     if(Test-Path -LiteralPath $File){[IO.File]::Replace($bridgeTemp,$File,($File+'.backup-'+[Guid]::NewGuid().ToString()))}

@@ -20,6 +20,7 @@ import {turnsOf} from './state.mjs';
 import {CommandApprovalJournal, verifyCommandApproval} from './command-approval.mjs';
 import {ComputerApprovalJournal, verifyComputerApproval} from './computer-approval.mjs';
 import {PermissionsApprovalJournal, verifyPermissionsApproval} from './permissions-approval.mjs';
+import {PopupReplyJournal,verifyPopupReply} from './popup-replies.mjs';
 import {setTimeout as delay} from 'node:timers/promises';
 
 const [threadId, duration, mode = 'session'] = process.argv.slice(2);
@@ -36,6 +37,7 @@ const models = new GpuModelSettings((method, params) => rpc.request(method, para
 const approvals = new CommandApprovalJournal(path.join(process.env.LOCALAPPDATA, 'CodexSessionBridge', 'command-approval-journal'));
 const computerApprovals = new ComputerApprovalJournal(path.join(process.env.LOCALAPPDATA, 'CodexSessionBridge', 'computer-approval-journal'));
 const permissionsApprovals = new PermissionsApprovalJournal(path.join(process.env.LOCALAPPDATA, 'CodexSessionBridge', 'permissions-approval-journal'));
+const popupReplies = new PopupReplyJournal(path.join(process.env.LOCALAPPDATA, 'CodexSessionBridge', 'popup-reply-journal'));
 const newTasks=new GpuNewTasks({request:(method,params)=>rpc.request(method,params),create:params=>createEmptyGpuTask(cliPath,params),
   journalDirectory:path.join(process.env.LOCALAPPDATA,'CodexSessionBridge','new-task-journal')});
 const projectWriter = new GpuProjectWriter({request: (method, params) => rpc.request(method, params),
@@ -120,11 +122,12 @@ async function handle(message) {
   }
   if (mode === 'hub' && message.method === 'shareRoots') return readGpuShareRoots(message.params?.names);
   if (mode === 'hub' && message.method === 'modelConfig') { await initialize(); return models.write(message.params); }
-  if (mode === 'hub' && ['commandApproval','computerApproval','permissionsApproval'].includes(message.method)) {
+  if (mode === 'hub' && ['commandApproval','computerApproval','permissionsApproval','popupReply'].includes(message.method)) {
     const {verify,journal,reply} = {
       commandApproval: {verify:verifyCommandApproval,journal:approvals,reply:'replyCommandApproval'},
       computerApproval: {verify:verifyComputerApproval,journal:computerApprovals,reply:'replyComputerApproval'},
       permissionsApproval: {verify:verifyPermissionsApproval,journal:permissionsApprovals,reply:'replyPermissionsApproval'},
+      popupReply: {verify:verifyPopupReply,journal:popupReplies,reply:'replyPopup'},
     }[message.method];
     const approval = message.params, id = approval?.threadId, watched = watches.get(id);
     if (!UUID.test(id ?? '') || !watched || watched.error || watched.disconnected || busyThreads.has(id)) throw Error('GPU not ready');
@@ -134,7 +137,10 @@ async function handle(message) {
       if (fresh.state.ownerClientId !== watched.state.ownerClientId) throw Error('GPU owner changed');
       verify(fresh.state, approval);
       return await journal.run(approval, async () => {
-        const result = await fresh.client[reply]({session: fresh.state, appVersion: hostAppVersion, approval});
+        const result = await fresh.client[reply]({session: fresh.state, appVersion: hostAppVersion, approval}).catch(error=>{
+          if(message.method==='popupReply')throw Error('GPU 질문 응답의 처리 결과를 확인하지 못했습니다. GPU 화면을 확인해 주세요. 자동 재전송하지 않습니다');
+          throw error;
+        });
         if (result?.ok !== true) throw Error('GPU approval was not acknowledged');
         // The private handler can return ok even when a request disappeared.
         // Observe resolution as well; never simulate a successful local click.
@@ -195,7 +201,7 @@ async function handle(message) {
       try { fs.writeSync(fd, JSON.stringify({operationId, threadId: targetId, attemptedAt: new Date().toISOString()})); fs.fsyncSync(fd); }
       finally { fs.closeSync(fd); }
       // Record before the side effect; retries with this operation ID are always refused.
-      return await fresh.client.startTextTurn({session: fresh.state, appVersion: hostAppVersion, text, clientUserMessageId: operationId, settings,allowEmptyInitial:empty});
+      return await fresh.client.startTextTurn({session: fresh.state, appVersion: hostAppVersion, text, clientUserMessageId: operationId, settings,allowEmptyInitial:empty,plan:message.params?.plan??null});
     } finally { fresh?.close(); if (mode === 'hub') busyThreads.delete(targetId); else busy = false; }
   }
   throw new Error('Unknown bridge operation');

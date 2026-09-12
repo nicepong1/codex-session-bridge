@@ -4,7 +4,7 @@ import {WebSocketServer} from 'ws';
 import {readRoute, GPU_THREAD, UUID} from './guard-policy.mjs';
 
 // The desktop can never reach a local CLI through this adapter, even after its IPC owner disappears.
-export async function startGuardServer({read, threadId = GPU_THREAD, route = (method, params) => readRoute(method, params, threadId), onRequest = () => {}, onClientsChanged = () => {}}) {
+export async function startGuardServer({read, threadId = GPU_THREAD, route = (method, params) => readRoute(method, params, threadId), onRequest = () => {}, onClientsChanged = () => {}, onUnsupportedReply = () => {}}) {
   const capabilityPath = '/' + randomBytes(32).toString('hex');
   const server = http.createServer((req, res) => { res.writeHead(404); res.end(); });
   const wss = new WebSocketServer({noServer: true, maxPayload: 1024 * 1024, perMessageDeflate: false});
@@ -35,6 +35,17 @@ export async function startGuardServer({read, threadId = GPU_THREAD, route = (me
       try {
         if (binary) throw new Error('Text frames required');
         message = JSON.parse(data.toString('utf8'));
+        // Some native pickers reply directly to the app-server, even on a
+        // follower. No such request was issued by this guard. Do not route an
+        // uncorrelated ID to a different process, close the channel, or reply
+        // to a JSON-RPC response. Discard values and refresh GPU-owned state.
+        if(initialized&&message&&!Array.isArray(message)&&message.method==null&&
+           (typeof message.id==='string'||Number.isSafeInteger(message.id))&&
+           (Object.hasOwn(message,'result')||Object.hasOwn(message,'error'))) {
+          try{onUnsupportedReply({requestId:message.id});}catch{}
+          onRequest({method:'native-popup-response',allowed:false,reason:'owner-response-route-unavailable'});
+          return;
+        }
         if (!message || Array.isArray(message) || typeof message.method !== 'string') throw new Error('Invalid request');
         if (message.method === 'initialized' && message.id == null) {
           if (!initialized) throw new Error('Initialize first');

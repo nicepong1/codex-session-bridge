@@ -18,11 +18,12 @@ import {defaultModelWrite, modelSettings, modelCondition} from './model-settings
 import {commandApprovalFromFollower, approvalKey, sameApprovalDecision} from './command-approval.mjs';
 import {computerApprovalFromFollower} from './computer-approval.mjs';
 import {permissionsApprovalFromFollower} from './permissions-approval.mjs';
+import {popupReplyFromFollower} from './popup-replies.mjs';
 
 export class TaskHub extends EventEmitter {
   constructor({seconds = 28800, createConnection, allowActivation = false, warmRetentionMs = 600000, maxWarmTasks = 6,
     prefetchHistory = false, createHistoryConnection, refreshCatalog = false, canRefreshCatalog = () => true,
-    catalogFilter = rows => rows, maxParkedHistories = 6, allowProjectCreation = false, allowModelSettings = false, mapGpuPaths = false, pathMapper, allowNewTasks = false, allowCommandApprovals = false, allowComputerApprovals = false, allowPermissionsApprovals = false} = {}) {
+    catalogFilter = rows => rows, maxParkedHistories = 6, allowProjectCreation = false, allowModelSettings = false, mapGpuPaths = false, pathMapper, allowNewTasks = false, allowCommandApprovals = false, allowComputerApprovals = false, allowPermissionsApprovals = false, allowPopupReplies = false} = {}) {
     if (!Number.isInteger(warmRetentionMs) || warmRetentionMs < 1000 || warmRetentionMs > 600000 ||
         !Number.isInteger(maxWarmTasks) || maxWarmTasks < 0 || maxWarmTasks > 6 ||
         !Number.isInteger(maxParkedHistories) || maxParkedHistories < 0 || maxParkedHistories > 6) throw new Error('Invalid recent task retention limits');
@@ -39,6 +40,7 @@ export class TaskHub extends EventEmitter {
     this.lastSelectedAt = 0; this.commandApprovals = new Map(); this.allowCommandApprovals = allowCommandApprovals;
     this.computerApprovals = new Map(); this.allowComputerApprovals = allowComputerApprovals;
     this.permissionsApprovals = new Map(); this.allowPermissionsApprovals = allowPermissionsApprovals;
+    this.popupReplies = new Map(); this.allowPopupReplies = allowPopupReplies;
     this.metadataCache = new MetadataReadCache({onUse: event => this.emit('metadata', event)});
     this.taskListCache = new TaskListCache({onUse: event => this.emit('taskListCache', event),
       onUpdate: (result, params) => this.acceptCatalog(result, params)});
@@ -387,11 +389,13 @@ export class TaskHub extends EventEmitter {
   approveCommand(message) { return this.#approve(message, 'command'); }
   approveComputer(message) { return this.#approve(message, 'computer'); }
   approvePermissions(message) { return this.#approve(message, 'permissions'); }
+  replyPopup(message) { return this.#approve(message, 'popup'); }
   async #approve(message, kind) {
     const {enabled, registry, method, parse} = {
       command: {enabled:this.allowCommandApprovals, registry:this.commandApprovals, method:'commandApproval', parse:commandApprovalFromFollower},
       computer: {enabled:this.allowComputerApprovals, registry:this.computerApprovals, method:'computerApproval', parse:computerApprovalFromFollower},
       permissions: {enabled:this.allowPermissionsApprovals, registry:this.permissionsApprovals, method:'permissionsApproval', parse:permissionsApprovalFromFollower},
+      popup: {enabled:this.allowPopupReplies, registry:this.popupReplies, method:'popupReply', parse:popupReplyFromFollower},
     }[kind];
     const task = this.tasks.get(message?.params?.conversationId);
     if (!enabled || this.closed || !this.connection.online || task?.blocked) throw Error('GPU 연결이 끊겼거나 승인 전달이 비활성화되어 선택을 보내지 않았습니다');
@@ -414,14 +418,14 @@ export class TaskHub extends EventEmitter {
     });
     registry.set(key, {decision, promise}); return promise;
   }
-  async submit(id, operationId, text, selection = {}) {
+  async submit(id, operationId, text, selection = {}, plan = null) {
     const settings = modelSettings(selection, {empty: true});
     const task = this.tasks.get(id);
     if (!task?.policy.online || !this.connection.online || task.blocked) throw new Error('GPU task input unavailable');
     task.lastUsed = Date.now();
     if (Object.keys(settings).length && !this.allowModelSettings) throw new Error('gpu-guard-denied: model settings disabled');
-    return this.submissions.run(operationId, id + '\0' + text + (Object.keys(settings).length ? '\0' + JSON.stringify(settings) : ''),
-      () => this.connection.request('submitText', {threadId: id, operationId, text, ...(Object.keys(settings).length ? {settings} : {})}));
+    return this.submissions.run(operationId, id + '\0' + text + JSON.stringify({settings,plan}),
+      () => this.connection.request('submitText', {threadId: id, operationId, text, ...(Object.keys(settings).length ? {settings} : {}),...(plan?{plan}:{})}));
   }
   close() {
     if (this.closed) return; this.closed = true; clearInterval(this.maintenance);

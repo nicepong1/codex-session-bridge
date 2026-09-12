@@ -1,6 +1,6 @@
 {
   "name": "codex-session-bridge",
-  "version": "0.18.3",
+  "version": "0.19.0",
   "private": true,
   "type": "module",
   "description": "Connect a Windows Codex desktop to the same tasks on another Windows PC.",

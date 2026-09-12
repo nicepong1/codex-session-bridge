@@ -11,6 +11,9 @@ import { SessionState } from '../src/state.mjs';
 import {pendingCommand,COMMAND_APPROVAL_METHOD} from '../src/command-approval.mjs';
 import {pendingComputerApproval,COMPUTER_APPROVAL_METHOD} from '../src/computer-approval.mjs';
 import {pendingPermissionsApproval,PERMISSIONS_APPROVAL_METHOD} from '../src/permissions-approval.mjs';
+import {pendingPopupReply,FILE_APPROVAL_METHOD,USER_INPUT_METHOD,MCP_REPLY_METHOD} from '../src/popup-replies.mjs';
+import {PLAN_PREFIX,planFollowupFromFollower} from '../src/plan-followup.mjs';
+import {NativeViewPolicy} from '../src/native-view-policy.mjs';
 
 // Isolated fake router: these tests never connect to the real Codex pipe.
 async function fixture(t, handle, options = {}) {
@@ -82,6 +85,43 @@ test('command approval sends the exact once-only decision to the verified GPU ow
   assert.equal(received[0].version,1);assert.equal(received[0].targetClientId,owner);
   assert.deepEqual(received[0].params,{conversationId:id,requestId:76,decision:'accept'});
   assert.throws(()=>client.replyCommandApproval(args));
+});
+
+test('plan button sends one text turn in Default mode with GPU instructions and no notebook permissions',async t=>{
+  const id=randomUUID(),owner=randomUUID(),turnId=randomUUID(),received=[];
+  const client=await fixture(t,(message,respond)=>{if(message.type==='request'){received.push(message);respond({result:{turn:{id:randomUUID()}}},owner)}},
+    {allowRemoteInput:true,allowedThreadId:id});client.follow(id,owner);
+  const session=new SessionState(id,owner);session.state={id,sessionId:id,threadRuntimeStatus:{type:'idle'},turns:[{turnId,status:'completed',items:[]}],
+    latestCollaborationMode:{mode:'plan',settings:{model:'example',reasoning_effort:'medium',developer_instructions:'GPU only'}},
+    requests:[{id:`implement-plan:${turnId}`,method:'item/plan/requestImplementation',params:{threadId:id,turnId,planContent:'Example plan'}}]};
+  session.stale=false;session.receivedAt=Date.now();const policy=new NativeViewPolicy(id);Object.assign(policy,{state:session.state,online:true,owner});policy.followers.add('laptop');
+  const text=PLAN_PREFIX+'Example plan',message={sourceClientId:'laptop',params:{conversationId:id,turnStart:{request:{collaborationMode:{mode:'default'}}}}};
+  const plan=planFollowupFromFollower(message,policy,text),args={session,appVersion:'26.903.8094.0',text,clientUserMessageId:randomUUID(),plan};
+  await client.startTextTurn(args);assert.equal(received.length,1);assert.equal(received[0].targetClientId,owner);assert.equal(received[0].version,2);
+  assert.deepEqual(received[0].params.turnStart.request.collaborationMode,{mode:'default',settings:{model:'example',reasoning_effort:'medium',developer_instructions:'GPU only'}});
+  assert.equal(received[0].params.turnStart.request.approvalPolicy,undefined);assert.equal(received[0].params.turnStart.request.input[0].text,text);
+  assert.throws(()=>client.startTextTurn(args));
+});
+
+for(const [method,requestMethod,response,extra] of [
+  [FILE_APPROVAL_METHOD,'item/fileChange/requestApproval','decline',{}],
+  [USER_INPUT_METHOD,'item/tool/requestUserInput',{answers:{q:{answers:['private-answer']}}},{questions:[{id:'q',question:'Question'}]}],
+  [MCP_REPLY_METHOD,'mcpServer/elicitation/request',{action:'accept',content:{enabled:true}},
+    {mode:'form',serverName:'example',requestedSchema:{type:'object',properties:{enabled:{type:'boolean'}}}}],
+])test(`popup IPC ${method} preserves the exact response and owner`,async t=>{
+  const id=randomUUID(),owner=randomUUID(),turnId=randomUUID(),received=[];
+  const client=await fixture(t,(message,respond)=>{if(message.type==='request'){received.push(message);respond({ok:true},owner)}},
+    {allowRemoteInput:true,allowedThreadId:id});client.follow(id,owner);
+  const state={id,sessionId:id,turns:[{turnId,status:'inProgress',items:[{id:'item',type:'fileChange',changes:[]}]}],
+    requests:[{id:42,method:requestMethod,params:{threadId:id,turnId,itemId:'item',...extra}}]};
+  const session={threadId:id,ownerClientId:owner,state,stale:false,receivedAt:Date.now()};
+  const approval={...pendingPopupReply(state,id,42,method,response),ownerClientId:owner};
+  const args={session,approval,appVersion:'26.903.8094.0'};
+  assert.throws(()=>client.replyPopup({...args,approval:{...approval,requestHash:'changed'}}));
+  assert.deepEqual(await client.replyPopup(args),{ok:true});assert.equal(received.length,1);
+  assert.equal(received[0].method,method);assert.equal(received[0].version,1);assert.equal(received[0].targetClientId,owner);
+  assert.deepEqual(received[0].params,{conversationId:id,requestId:42,[method===FILE_APPROVAL_METHOD?'decision':'response']:response});
+  assert.throws(()=>client.replyPopup(args));
 });
 
 test('Computer Use response goes to the original GPU handler exactly once, retaining conversation scope', async t => {

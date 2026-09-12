@@ -19,11 +19,16 @@ function validDecision(decision, params) {
   const proposed = !ordinary && decision && Object.keys(decision).length === 1 && amendment && Object.keys(amendment).length === 1 &&
     Array.isArray(rule) && rule.length > 0 && rule.every(v => typeof v === 'string' && v.length > 0) &&
     sameApprovalDecision(rule, params.proposedExecpolicyAmendment);
-  if (!ordinary && !proposed) throw Error('GPU가 제시하지 않은 승인 선택입니다');
+  const network = decision?.applyNetworkPolicyAmendment, networkRule = network?.network_policy_amendment;
+  const proposedNetwork = !ordinary && decision && Object.keys(decision).length === 1 && network && Object.keys(network).length === 1 &&
+    networkRule && Object.keys(networkRule).length === 2 && ['allow','deny'].includes(networkRule.action) &&
+    typeof networkRule.host === 'string' && networkRule.host.length > 0 &&
+    Array.isArray(params.proposedNetworkPolicyAmendments) && params.proposedNetworkPolicyAmendments.some(rule => sameApprovalDecision(rule, networkRule));
+  if (!ordinary && !proposed && !proposedNetwork) throw Error('GPU가 제시하지 않은 승인 선택입니다');
   const available = params.availableDecisions;
   if (available != null && (!Array.isArray(available) || !available.some(value => sameApprovalDecision(value, decision))))
     throw Error('GPU가 제공한 승인 선택이 아닙니다');
-  if (available == null && !['accept','decline','cancel'].includes(decision)) throw Error('GPU 승인 선택 목록이 필요합니다');
+  if (available == null && !proposedNetwork && !['accept','decline','cancel'].includes(decision)) throw Error('GPU 승인 선택 목록이 필요합니다');
 }
 
 export function pendingCommand(state, threadId, requestId, decision) {
@@ -31,9 +36,15 @@ export function pendingCommand(state, threadId, requestId, decision) {
     throw Error('승인 요청의 작업을 확인할 수 없습니다');
   const matches = (state.requests ?? []).filter(request => request.id === requestId);
   const request = matches.length === 1 ? matches[0] : null, params = request?.params;
+  const networkRequest = typeof params?.networkApprovalContext?.host === 'string' && params.networkApprovalContext.host.length > 0 &&
+    typeof params.networkApprovalContext.protocol === 'string' && params.networkApprovalContext.protocol.length > 0;
+  const stdinRequest=params?.kind==='writeStdin'&&UUID.test(params.approvalId??'');
   if (request?.method !== REQUEST_METHOD || params?.threadId !== threadId || !UUID.test(params.turnId ?? '') ||
-      typeof params.itemId !== 'string' || !params.itemId || typeof params.command !== 'string' || !params.command ||
-      typeof params.cwd !== 'string' || !params.cwd ||
+      typeof params.itemId !== 'string' || !params.itemId ||
+      (params.kind!=null&&!['command','writeStdin'].includes(params.kind)) ||
+      (params.kind==='writeStdin'&&!stdinRequest) ||
+      (!(typeof params.command === 'string' && params.command) && !((networkRequest||stdinRequest) && params.command == null)) ||
+      (!(typeof params.cwd === 'string' && params.cwd) && !((networkRequest||stdinRequest) && params.cwd == null)) ||
       !turnsOf(state).some(turn => turn.turnId === params.turnId && turn.status === 'inProgress'))
     throw Error('현재 대기 중인 명령 승인 요청이 아닙니다. 화면을 다시 확인해 주세요');
   // Carry the actual click; never synthesize a saved rule or upgrade accept.

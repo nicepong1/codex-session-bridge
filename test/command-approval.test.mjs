@@ -85,3 +85,23 @@ test('hub forwards only explicit clicks, deduplicates them, and has no offline q
   connection.online=false;await assert.rejects(hub.approveCommand(message),/연결/);
   connection.online=true;hub.allowCommandApprovals=false;await assert.rejects(hub.approveCommand(message),/비활성화/);assert.equal(calls.length,1);
 });
+
+test('managed network and stdin callbacks keep their original target and callback identity',()=>{
+  const {id,policy,session}=fixture(),p=policy.state.requests[0].params;
+  p.command=null;p.cwd=null;p.networkApprovalContext={host:'example.com',protocol:'https'};
+  const rule={action:'allow',host:'example.com'},decision={applyNetworkPolicyAmendment:{network_policy_amendment:rule}};
+  p.proposedNetworkPolicyAmendments=[rule];p.availableDecisions=['accept','decline',decision];
+  const bound={...pendingCommand(policy.state,id,76,decision),ownerClientId:policy.owner};
+  assert.deepEqual(bound.decision,decision);
+  for(const changed of [{action:'allow',host:'*.com'},{action:'deny',host:'example.com'},{...rule,port:443}])
+    assert.throws(()=>pendingCommand(policy.state,id,76,{applyNetworkPolicyAmendment:{network_policy_amendment:changed}}));
+  p.availableDecisions=['accept'];assert.throws(()=>pendingCommand(policy.state,id,76,decision));
+  p.availableDecisions=null;assert.doesNotThrow(()=>pendingCommand(policy.state,id,76,decision));
+  p.networkApprovalContext.host='different.com';assert.throws(()=>verifyCommandApproval(session,bound));
+  delete p.networkApprovalContext;assert.throws(()=>pendingCommand(policy.state,id,76,'accept'));
+  p.kind='writeStdin';p.approvalId=randomUUID();
+  const stdin={...pendingCommand(policy.state,id,76,'accept'),ownerClientId:policy.owner};
+  p.approvalId=randomUUID();assert.throws(()=>verifyCommandApproval(session,stdin));
+  p.approvalId=null;assert.throws(()=>pendingCommand(policy.state,id,76,'accept'));
+  p.kind='unknown';assert.throws(()=>pendingCommand(policy.state,id,76,'accept'));
+});

@@ -21,6 +21,9 @@ import {settingsFromFollower, settingsFromTurn, modelFollowerResult} from './mod
 import {COMMAND_APPROVAL_METHOD} from './command-approval.mjs';
 import {COMPUTER_APPROVAL_METHOD} from './computer-approval.mjs';
 import {PERMISSIONS_APPROVAL_METHOD} from './permissions-approval.mjs';
+import {POPUP_REPLY_METHODS,usesLegacyComputerReply} from './popup-replies.mjs';
+import {planFollowupFromFollower} from './plan-followup.mjs';
+import {popupCapabilities} from './popup-catalog.mjs';
 import {acquireUserSingleton} from './user-singleton.mjs';
 import {BufferedJsonReport,createEndpointFile,endpointFilePath} from './runtime-files.mjs';
 
@@ -55,7 +58,7 @@ function record(options) { if (!reportClosed) reportFile.write(report,options); 
 record({immediate:true});
 const revealAt = revealAfter == null ? 0 : Date.now() + revealAfter * 1000;
 if (revealAfter != null) report.catalogVisibilityTest = {threadId: GPU_THREAD, revealAt: new Date(revealAt).toISOString(), scope: 'Existing stored test row hidden then revealed; no new task or prompt'};
-const hub = new TaskHub({seconds, allowActivation: true, allowNewTasks:Boolean(values['enable-text-input']), allowCommandApprovals:Boolean(values['enable-text-input']), allowComputerApprovals:Boolean(values['enable-text-input']), allowPermissionsApprovals:Boolean(values['enable-text-input']), allowProjectCreation: Boolean(values.launch), allowModelSettings: Boolean(values.launch), mapGpuPaths: true, prefetchHistory: true, refreshCatalog: true,
+const hub = new TaskHub({seconds, allowActivation: true, allowNewTasks:Boolean(values['enable-text-input']), allowCommandApprovals:Boolean(values['enable-text-input']), allowComputerApprovals:Boolean(values['enable-text-input']), allowPermissionsApprovals:Boolean(values['enable-text-input']), allowPopupReplies:Boolean(values['enable-text-input']), allowProjectCreation: Boolean(values.launch), allowModelSettings: Boolean(values.launch), mapGpuPaths: true, prefetchHistory: true, refreshCatalog: true,
   canRefreshCatalog: () => wsClients > 0,
   catalogFilter: rows => Date.now() < revealAt ? rows.filter(row => row.id !== GPU_THREAD) : rows});
 report.historyPrefetch = {cached: 0, queued: 0, bytes: 0, failures: [],
@@ -75,7 +78,7 @@ function canWrite(task) {
 }
 function syncTask(task) {
   report.tasks[task.id] = {title: task.title, online: task.policy.online, blocked: task.blocked, ownerClientId: task.policy.owner,
-    storedPreview: task.policy.preview,
+    storedPreview: task.policy.preview, popupCapabilities:popupCapabilities(task.policy.state),
     sourceRevision: task.policy.sourceRevision, followerClientIds: [...task.policy.followers], inputEnabled: canWrite(task),
     desired: task.desired, parked: task.parked, lastUsedAt: new Date(task.lastUsed).toISOString(),
     viewRefreshCount: task.viewRefreshCount,
@@ -111,6 +114,10 @@ async function respond(message) {
   }
   try {
     if (!canWrite(task)) throw new Error('GPU에서 이 작업을 열고 연결될 때까지 기다려 주세요');
+    if(POPUP_REPLY_METHODS.includes(message.method)) {
+      const result=await hub[usesLegacyComputerReply(message,task.policy.state)?'approveComputer':'replyPopup'](message);
+      send({...base,resultType:'success',result});return;
+    }
     const approvalHandler = {[COMMAND_APPROVAL_METHOD]:'approveCommand', [COMPUTER_APPROVAL_METHOD]:'approveComputer',
       [PERMISSIONS_APPROVAL_METHOD]:'approvePermissions'}[message.method];
     if (approvalHandler) {
@@ -125,10 +132,11 @@ async function respond(message) {
     }
     const text = textFromFollower(message, task.id), operationId = message.params.turnStart.request.clientUserMessageId;
     const settings = settingsFromTurn(message.params.turnStart.request);
+    const plan=planFollowupFromFollower(message,task.policy,text);
     let operation = report.submissions.find(s => s.operationId === operationId);
     if (!operation) { operation = {threadId: task.id, operationId, attemptedAt: new Date().toISOString(), outcome: 'pending'}; report.submissions.push(operation); record(); }
     try {
-      const result = await hub.submit(task.id, operationId, text, settings);
+      const result = await hub.submit(task.id, operationId, text, settings,plan);
       operation.outcome = 'acknowledged'; operation.turnId = result?.result?.turn?.id ?? null; record();
       send({...base, resultType: 'success', result});
     } catch (error) { if (operation.outcome !== 'acknowledged') operation.outcome = 'unconfirmed-or-rejected'; record(); throw error; }
@@ -234,6 +242,9 @@ hub.on('permissionsApproval', ({response,...event}) => {
   report.permissionsApprovals = [...(report.permissionsApprovals ?? []), {...event,
     scope:response?.scope ?? 'turn', at:new Date().toISOString()}].slice(-100); record();
 });
+hub.on('popupReply', ({response,...event}) => {
+  report.popupReplies=[...(report.popupReplies??[]),{...event,at:new Date().toISOString()}].slice(-100);record();
+});
 hub.on('newTask',event=>{
   report.newTasks=[...(report.newTasks??[]),{...event,at:new Date().toISOString()}].slice(-100);record();
   if(event.stage==='first-input-acknowledged') {
@@ -280,6 +291,11 @@ hub.on('taskError', event => { report.errors.push({...event, at: new Date().toIS
 hub.on('connection', state => { if (stopping) return; report.connection = {...state, changedAt: new Date().toISOString()}; record({immediate:true}); });
 try {
   server = await startGuardServer({read: (method, params, context) => hub.read(method, params, context), route: desktopHubRoute,
+    onUnsupportedReply: ({requestId}) => {
+      for(const task of hub.tasks.values())if(task.policy.online&&task.policy.followers.size&&task.policy.state?.requests?.some(r=>r.id===requestId)){
+        task.policy.revision++;publish(task);
+      }
+    },
     onRequest: event => { report.rpc.push({...event, at: new Date().toISOString()}); report.rpc = report.rpc.slice(-500); record(); },
     onClientsChanged: count => { wsClients = count; report.wsClients = count; if (count) recoverySnapshots = 0; record(); }});
   report.port = server.port;

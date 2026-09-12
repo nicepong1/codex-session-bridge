@@ -109,3 +109,16 @@ test('catalog replay history is bounded', async () => {
     const result = server.notifyTaskNames(rows); assert.equal(result.retained, 1000); assert.equal(result.delivered, 0);
   } finally { await server.close(); }
 });
+
+test('a native picker response cannot be misrouted or disconnect the app-server channel',async t=>{
+  const replies=[],reads=[],events=[];
+  const server=await startGuardServer({read:async(method)=>{reads.push(method);return{}},
+    onUnsupportedReply:event=>replies.push(event),onRequest:event=>events.push(event)});
+  const ws=new WebSocket(server.url);t.after(async()=>{ws.terminate();await server.close()});await once(ws,'open');
+  let response=once(ws,'message');ws.send(JSON.stringify({id:1,method:'initialize'}));await response;
+  ws.send(JSON.stringify({id:42,result:{answers:'private-credential'}}));
+  response=once(ws,'message');ws.send(JSON.stringify({id:2,method:'model/list',params:{}}));
+  assert.equal(JSON.parse((await response)[0]).id,2);assert.equal(ws.readyState,WebSocket.OPEN);
+  assert.deepEqual(replies,[{requestId:42}]);assert.deepEqual(reads,['initialize','model/list']);
+  assert.doesNotMatch(JSON.stringify(events),/private-credential|answers/);
+});

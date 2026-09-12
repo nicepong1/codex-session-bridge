@@ -15,7 +15,7 @@ export async function diagnose(profile=loadProfile()){
     try{({stdout}=await execute('ssh',sshArguments(prepared,remoteNodeCommand(prepared,'host-doctor.mjs')),{windowsHide:true,timeout:45000,maxBuffer:65536}))}
     catch(e){if(e.code===2&&e.stdout)stdout=e.stdout;else throw e}
     const remote=JSON.parse(stdout.trim());
-    if(remote.bridgeVersion!=='0.18.3'||typeof remote.ready!=='boolean')throw Error('Invalid host diagnostic');
+    if(remote.bridgeVersion!=='0.19.0'||typeof remote.ready!=='boolean')throw Error('Invalid host diagnostic');
     report.host=remote;report.ready=report.client.compatible&&remote.ready;
   }catch(e){
     const text=String(e.stderr??'');

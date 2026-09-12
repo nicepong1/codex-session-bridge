@@ -1,4 +1,5 @@
 import {TESTED_APP_VERSION,supportedHostVersion} from './installed.mjs';
+import {popupNoticeState} from './popup-catalog.mjs';
 
 // A read-only view of one explicitly selected GPU conversation. No local task is created.
 export class NativeViewPolicy {
@@ -95,6 +96,6 @@ export class NativeViewPolicy {
     return {type: 'broadcast', method: 'thread-stream-state-changed', version: 11,
       sourceClientId: clientId, targetClientIds: recipients,
       params: {hostId: 'local', conversationId: this.viewThreadId,
-        change: {type: 'snapshot', revision: this.revision, conversationState: this.state}}};
+        change: {type: 'snapshot', revision: this.revision, conversationState: popupNoticeState(this.state)}}};
   }
 }

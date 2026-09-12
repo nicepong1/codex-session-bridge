@@ -5,9 +5,11 @@ import { FrameDecoder, encodeFrame } from './framing.mjs';
 import {TESTED_APP_VERSION,supportedHostVersion} from './installed.mjs';
 import { turnsOf } from './state.mjs';
 import {modelSettings, modelTurnOverrides, modelCondition} from './model-settings.mjs';
+import {planTurnOverrides} from './plan-followup.mjs';
 import {COMMAND_APPROVAL_METHOD, verifyCommandApproval} from './command-approval.mjs';
 import {COMPUTER_APPROVAL_METHOD, verifyComputerApproval} from './computer-approval.mjs';
 import {PERMISSIONS_APPROVAL_METHOD, verifyPermissionsApproval} from './permissions-approval.mjs';
+import {FILE_APPROVAL_METHOD, verifyPopupReply} from './popup-replies.mjs';
 
 export const TEST_CHAT_TEXT = '테스트용으로 열어둔 채팅이야';
 
@@ -194,9 +196,18 @@ export class DesktopIpc extends EventEmitter {
       {version: 1, targetClientId: session.ownerClientId, timeoutMs: 10000}).then(response => response.result);
   }
 
-  startTextTurn({session, appVersion, text, clientUserMessageId, settings = {}, allowEmptyInitial = false}) {
+  replyPopup({session,appVersion,approval}) {
+    if(!this.#allowRemoteInput||this.#probeUsed||!supportedHostVersion(appVersion)||session.threadId!==this.#allowedThreadId||this.#following.get(session.threadId)!==session.ownerClientId)
+      throw Error('A fresh, followed GPU owner is required for this reply');
+    verifyPopupReply(session,approval);this.#probeUsed=true;
+    const responseKey=approval.method===FILE_APPROVAL_METHOD?'decision':'response';
+    return this.#request(approval.method,{conversationId:session.threadId,requestId:approval.requestId,[responseKey]:approval.response},
+      {version:1,targetClientId:session.ownerClientId,timeoutMs:10000}).then(response=>response.result);
+  }
+
+  startTextTurn({session, appVersion, text, clientUserMessageId, settings = {}, allowEmptyInitial = false, plan = null}) {
     if (!this.#allowRemoteInput || this.#probeUsed) throw new Error('Remote input is disabled or already attempted');
-    const overrides = modelTurnOverrides(session.state, settings);
+    const overrides = plan ? planTurnOverrides(session,plan,text,settings) : modelTurnOverrides(session.state, settings);
     if (!supportedHostVersion(appVersion) || session.threadId !== this.#allowedThreadId || !/^[a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12}$/i.test(session.threadId)) throw new Error('Untested GPU scope');
     if (typeof text !== 'string' || !text.trim() || text.length > 16000 || !/^[a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12}$/i.test(clientUserMessageId ?? '')) throw new Error('Invalid text input');
     const summary = session.summary();

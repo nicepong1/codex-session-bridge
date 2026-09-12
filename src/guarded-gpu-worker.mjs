@@ -149,7 +149,7 @@ async function handle(message) {
       const settings = await models.validate(message.params?.settings, watched.state.state.latestThreadSettings?.model ?? watched.state.state.latestModel);
       fresh = await observeSession(id, {allowRemoteInput: true, allowedThreadId: id});
       if (fresh.state.ownerClientId !== watched.state.ownerClientId) throw new Error('GPU owner changed');
-      return await fresh.client.updateModelSettings({session: fresh.state, appVersion: hostAppVersion, settings});
+      return await fresh.client.updateModelSettings({session: fresh.state, appVersion: hostAppVersion, settings, condition: message.params?.condition});
     } finally { fresh?.close(); busyThreads.delete(id); }
   }
   if (mode === 'hub' && message.method === 'projectWrite') {

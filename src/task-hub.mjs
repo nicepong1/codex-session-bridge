@@ -14,7 +14,7 @@ import {CatalogPoller} from './catalog-poller.mjs';
 import {DesktopRecentOrder} from './desktop-recent-order.mjs';
 import {projectWriteRoute} from './project-write-policy.mjs';
 import {GpuPathMapper} from './gpu-path-mapper.mjs';
-import {defaultModelWrite, modelSettings} from './model-settings.mjs';
+import {defaultModelWrite, modelSettings, modelCondition} from './model-settings.mjs';
 import {commandApprovalFromFollower, approvalKey, sameApprovalDecision} from './command-approval.mjs';
 import {computerApprovalFromFollower} from './computer-approval.mjs';
 
@@ -373,12 +373,13 @@ export class TaskHub extends EventEmitter {
     if (request?.method !== 'thread-owner-discovery' || request.version !== 1) return this.tasks.get(id)?.policy.canHandle(request) ?? false;
     try { const task = await this.prepare(id); return task.policy.canHandle(request); } catch { return false; }
   }
-  async updateModel(id, selection) {
-    const settings = modelSettings(selection), task = this.tasks.get(id);
+  async updateModel(id, selection, {condition = null} = {}) {
+    const settings = modelSettings(selection), expected = modelCondition(condition), task = this.tasks.get(id);
     if (!this.allowModelSettings || this.closed || !task?.policy.online || !this.connection.online || task.blocked)
       throw new Error('GPU task model settings unavailable');
-    const result = await this.connection.request('modelSettings', {threadId: id, settings});
-    this.emit('modelSettings', {scope: 'task', threadId: id, ...settings, outcome: 'acknowledged'});
+    const result = await this.connection.request('modelSettings', {threadId: id, settings, ...(expected !== null ? {condition: expected} : {})});
+    if (typeof result?.applied !== 'boolean') throw Error('Invalid GPU model settings response');
+    this.emit('modelSettings', {scope: 'task', threadId: id, ...settings, outcome: result.applied ? 'acknowledged' : 'not-applied'});
     return result;
   }
   approveCommand(message) { return this.#approve(message, false); }

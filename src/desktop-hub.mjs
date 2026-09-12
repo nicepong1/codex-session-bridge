@@ -17,7 +17,7 @@ import {TaskHub} from './task-hub.mjs';
 import {turnsOf} from './state.mjs';
 import {readLastTask, saveLastTask} from './launch-state.mjs';
 import {readProjectCatalog, projectDisplayState, orderProjectsByActivity} from './project-catalog.mjs';
-import {settingsFromFollower, settingsFromTurn} from './model-settings.mjs';
+import {settingsFromFollower, settingsFromTurn, modelFollowerResult} from './model-settings.mjs';
 import {COMMAND_APPROVAL_METHOD} from './command-approval.mjs';
 import {COMPUTER_APPROVAL_METHOD} from './computer-approval.mjs';
 import {acquireUserSingleton} from './user-singleton.mjs';
@@ -115,8 +115,9 @@ async function respond(message) {
       send({...base, resultType: 'success', result}); return;
     }
     if (message.method === 'thread-follower-update-thread-settings') {
-      const result = await hub.updateModel(task.id, settingsFromFollower(message, task.id));
-      send({...base, resultType: 'success', result});
+      const {settings, condition} = settingsFromFollower(message, task.id);
+      const result = await hub.updateModel(task.id, settings, {condition});
+      send({...base, resultType: 'success', result: modelFollowerResult(message.version, result)});
       return;
     }
     const text = textFromFollower(message, task.id), operationId = message.params.turnStart.request.clientUserMessageId;

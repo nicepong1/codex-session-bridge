@@ -4,7 +4,7 @@ import { EventEmitter } from 'node:events';
 import { FrameDecoder, encodeFrame } from './framing.mjs';
 import {TESTED_APP_VERSION,supportedHostVersion} from './installed.mjs';
 import { turnsOf } from './state.mjs';
-import {modelSettings, modelTurnOverrides} from './model-settings.mjs';
+import {modelSettings, modelTurnOverrides, modelCondition} from './model-settings.mjs';
 import {COMMAND_APPROVAL_METHOD, verifyCommandApproval} from './command-approval.mjs';
 import {COMPUTER_APPROVAL_METHOD, verifyComputerApproval} from './computer-approval.mjs';
 
@@ -142,14 +142,22 @@ export class DesktopIpc extends EventEmitter {
     }, { version: 2, targetClientId: session.ownerClientId, timeoutMs: 15000 });
   }
 
-  updateModelSettings({session, appVersion, settings}) {
+  updateModelSettings({session, appVersion, settings, condition = null}) {
     const selection = modelSettings(settings);
+    const expected = modelCondition(condition);
     if (!this.#allowRemoteInput || this.#probeUsed || !supportedHostVersion(appVersion) || session.threadId !== this.#allowedThreadId ||
         session.stale || Date.now() - session.receivedAt > 5000 || this.#following.get(session.threadId) !== session.ownerClientId)
       throw new Error('A fresh, followed GPU owner is required for model settings');
+    // All validated host builds use v1: no atomic conditional update exists.
+    // A read-then-write check could overwrite a newer phone/desktop selection.
+    // Report not applied to v2 clients without sending any mutation to the host.
+    if (expected !== null) return Promise.resolve({applied: false});
     this.#probeUsed = true;
     return this.#request('thread-follower-update-thread-settings', {conversationId: session.threadId, threadSettings: selection},
-      {version: 1, targetClientId: session.ownerClientId, timeoutMs: 15000}).then(response => response.result);
+      {version: 1, targetClientId: session.ownerClientId, timeoutMs: 15000}).then(response => {
+        if (response.result?.ok !== true) throw Error('GPU model settings were not acknowledged');
+        return {applied: true};
+      });
   }
 
   replyCommandApproval({session, appVersion, approval}) {

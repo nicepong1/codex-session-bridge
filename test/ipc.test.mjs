@@ -40,6 +40,30 @@ async function fixture(t, handle, options = {}) {
   return client;
 }
 
+test('v2 model conditions never become unconditional v1 host mutations; ordinary choices normalize the actual acknowledgement',async t=>{
+  const id=randomUUID(),owner=randomUUID(),received=[];
+  const client=await fixture(t,(message,respond)=>{if(message.type==='request'){received.push(message);respond({ok:true},owner);}},
+    {allowRemoteInput:true,allowedThreadId:id});
+  client.follow(id,owner);
+  const session={threadId:id,ownerClientId:owner,stale:false,receivedAt:Date.now()};
+  const args={session,appVersion:'26.903.8094.0',settings:{model:'example',effort:'high'}};
+  assert.deepEqual(await client.updateModelSettings({...args,condition:{ifEffortEquals:'medium'}}),{applied:false});
+  assert.equal(received.length,0);
+  assert.deepEqual(await client.updateModelSettings(args),{applied:true});
+  assert.equal(received.length,1);assert.equal(received[0].version,1);assert.equal(received[0].targetClientId,owner);
+  assert.deepEqual(received[0].params,{conversationId:id,threadSettings:args.settings});
+  assert.throws(()=>client.updateModelSettings(args));
+});
+
+test('invalid model acknowledgement cannot claim an applied update',async t=>{
+  const id=randomUUID(),owner=randomUUID();
+  const client=await fixture(t,(message,respond)=>{if(message.type==='request')respond({applied:true},owner);},
+    {allowRemoteInput:true,allowedThreadId:id});
+  client.follow(id,owner);
+  await assert.rejects(client.updateModelSettings({session:{threadId:id,ownerClientId:owner,stale:false,receivedAt:Date.now()},
+    appVersion:'26.903.8094.0',settings:{model:'example'}}),/not acknowledged/);
+});
+
 test('command approval sends the exact once-only decision to the verified GPU owner', async t => {
   const id=randomUUID(),owner=randomUUID(),turn=randomUUID(), received=[];
   const client=await fixture(t,(message,respond)=>{if(message.type==='request'){received.push(message);respond({ok:true},owner);}},

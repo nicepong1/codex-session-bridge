@@ -42,8 +42,26 @@ export function defaultModelWrite(params) {
 }
 
 export function settingsFromFollower(message, id) {
-  if (message?.method !== 'thread-follower-update-thread-settings' || message.version !== 1 || message.params?.conversationId !== id) fail();
-  return modelSettings(message.params.threadSettings, {desktop: true});
+  if (message?.method !== 'thread-follower-update-thread-settings' || ![1, 2].includes(message.version) || message.params?.conversationId !== id) fail();
+  const p = message.params;
+  if (Object.keys(p).some(k => !['conversationId', 'hostId', 'threadSettings', 'activeTurnId', 'condition'].includes(k)) ||
+      (p.hostId != null && p.hostId !== 'local') || p.activeTurnId != null || (message.version === 1 && p.condition != null)) fail();
+  return {settings: modelSettings(p.threadSettings, {desktop: true}), condition: modelCondition(p.condition)};
+}
+
+export function modelCondition(value) {
+  if (value == null) return null;
+  if (!plain(value) || Object.keys(value).some(k => !['ifEffortEquals', 'ifModelEquals'].includes(k)) ||
+      !Object.hasOwn(value, 'ifEffortEquals') || !effortName(value.ifEffortEquals) ||
+      (value.ifModelEquals != null && !modelName(value.ifModelEquals))) fail();
+  return {ifEffortEquals: value.ifEffortEquals, ...(value.ifModelEquals != null ? {ifModelEquals: value.ifModelEquals} : {})};
+}
+
+export function modelFollowerResult(version, result) {
+  if (![1, 2].includes(version) || typeof result?.applied !== 'boolean') fail();
+  if (version === 2) return {applied: result.applied};
+  if (!result.applied) throw Error('GPU model settings were not applied');
+  return {ok: true};
 }
 
 export function settingsFromTurn(request) {

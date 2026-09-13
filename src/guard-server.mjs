@@ -71,7 +71,8 @@ export async function startGuardServer({read, threadId = GPU_THREAD, route = (me
           ...(message.method === 'thread/list' ? {sectionId: message.params?.sectionId ?? null,
             sortKey: message.params?.sortKey ?? null, sortDirection: message.params?.sortDirection ?? null,
             returnedCount: result?.data?.length ?? null, hasMore: result?.nextCursor != null} : {}),
-          ...(message.method === 'thread/read' ? {threadId: message.params.threadId, includeTurns: Boolean(message.params.includeTurns)} : {})});
+          ...(message.method === 'thread/read' ? {threadId: message.params.threadId, includeTurns: Boolean(message.params.includeTurns)} : {}),
+          ...(['thread/archive','thread/unarchive'].includes(message.method) ? {threadId: message.params.threadId} : {})});
         if (ws.readyState === ws.OPEN) {
           ws.send(JSON.stringify({id: message.id, result}));
           // The installed desktop starts requests after initialize succeeds and
@@ -84,7 +85,7 @@ export async function startGuardServer({read, threadId = GPU_THREAD, route = (me
       } catch (error) {
         if (beganInitialize) initializing = false;
         onRequest({method: message?.method ?? 'invalid', allowed: false, elapsedMs: Math.round(performance.now() - started),
-          ...(['thread/resume','turn/start'].includes(message?.method) && typeof message.params?.threadId === 'string' ? {threadId: message.params.threadId} : {}),
+          ...(['thread/resume','turn/start','thread/archive','thread/unarchive'].includes(message?.method) && typeof message.params?.threadId === 'string' ? {threadId: message.params.threadId} : {}),
           ...(['thread/start','turn/start'].includes(message?.method) ? {detail:error.message,paramKeys:Object.keys(message.params??{}),cwd:message.params?.cwd,permissions:message.params?.permissions,sandbox:message.params?.sandbox} : {}),
           reason: error.message === 'Initialize first' ? 'initialization-required' : error.message.startsWith('gpu-guard-denied:') ? 'method-denied' : 'upstream-error'});
         if (message?.id != null && ws.readyState === ws.OPEN) ws.send(JSON.stringify({id: message.id, error: {code: -32020, message: error.message}}));
@@ -95,6 +96,17 @@ export async function startGuardServer({read, threadId = GPU_THREAD, route = (me
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve); });
   return {url: 'ws://127.0.0.1:' + server.address().port + capabilityPath,
     port: server.address().port,
+    notifyArchiveState: (threadId, archived) => {
+      if (!UUID.test(threadId ?? '') || typeof archived !== 'boolean') throw Error('Invalid archive notification');
+      if (archived) taskNames.delete(threadId);
+      let delivered = 0;
+      for (const ws of notificationReady) {
+        if (ws.readyState !== ws.OPEN) continue;
+        if (ws.bufferedAmount > 1024 * 1024) { ws.terminate(); continue; }
+        ws.send(JSON.stringify({method: archived ? 'thread/archived' : 'thread/unarchived', params: {threadId}})); delivered++;
+      }
+      return {delivered};
+    },
     notifyTaskNames: rows => {
       if (!Array.isArray(rows) || rows.length > 5000 || rows.some(row => !UUID.test(row?.id ?? '') || typeof row.title !== 'string' || row.title.length > 160)) throw new Error('Invalid catalog notifications');
       let delivered = 0;

@@ -1,5 +1,13 @@
 # 사용설명서
 
+## 대화 보관과 복원
+
+0.19.2부터 GPU 연결 창의 기존 대화 메뉴에서 **보관**을 사용할 수 있습니다. GPU에서 보관 처리가 성공하면 최근 목록에서 빠집니다. 보관된 대화 목록의 **보관 해제**로 같은 대화를 복원할 수 있습니다.
+
+노트북과 GPU에 같은 브리지 버전을 설치하세요. 이미 켜져 있는 연결 창은 이전 코드를 계속 사용할 수 있으므로 미전송 입력문을 보관하고 연결용 앱을 트레이에서도 종료한 다음 GPU Codex 아이콘으로 다시 여세요.
+
+연결 중단으로 결과를 확인하지 못한 요청은 자동으로 반복하지 않습니다. 다시 연결해 보관 목록과 최근 목록을 먼저 확인하세요. GPU 공식 API가 거절한 요청은 성공으로 처리하지 않습니다.
+
 ## 1. 준비
 
 호스트는 실제 프로젝트와 실행 도구가 있는 Windows x64 PC입니다. 노트북은 원격으로 지시할 Windows x64 PC입니다. 두 PC가 서로 다른 Windows 사용자명·설치 경로를 사용해도 됩니다. 각 사용자는 본인 계정과 접근 권한을 준비해야 합니다.
@@ -32,7 +40,7 @@ ssh-add "$env:USERPROFILE\.ssh\id_ed25519"
 
 ## 3. 호스트 설치
 
-1. GitHub Releases에서 `codex-session-bridge-0.19.1-windows-x64.zip`과 `.sha256` 파일을 받습니다. ZIP의 `Get-FileHash -Algorithm SHA256` 결과를 체크섬 파일과 비교합니다.
+1. GitHub Releases에서 `codex-session-bridge-0.19.2-windows-x64.zip`과 `.sha256` 파일을 받습니다. ZIP의 `Get-FileHash -Algorithm SHA256` 결과를 체크섬 파일과 비교합니다.
 2. ZIP을 **압축 해제**합니다. 압축 파일 안에서 직접 실행하지 않습니다.
 3. `Install.cmd`를 두 번 클릭하고 `2`를 입력합니다. 프로그램은 현재 Windows 사용자의 LocalAppData에 설치됩니다.
 4. 설치 화면에 표시되는 Windows 사용자명, Tailscale 주소, `SHA256:...` 형식의 SSH 호스트 지문을 확인합니다. 다시 보려면 설치 폴더의 `Show-HostInfo.cmd`를 실행합니다.

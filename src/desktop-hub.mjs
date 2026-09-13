@@ -58,7 +58,7 @@ function record(options) { if (!reportClosed) reportFile.write(report,options); 
 record({immediate:true});
 const revealAt = revealAfter == null ? 0 : Date.now() + revealAfter * 1000;
 if (revealAfter != null) report.catalogVisibilityTest = {threadId: GPU_THREAD, revealAt: new Date(revealAt).toISOString(), scope: 'Existing stored test row hidden then revealed; no new task or prompt'};
-const hub = new TaskHub({seconds, allowActivation: true, allowNewTasks:Boolean(values['enable-text-input']), allowCommandApprovals:Boolean(values['enable-text-input']), allowComputerApprovals:Boolean(values['enable-text-input']), allowPermissionsApprovals:Boolean(values['enable-text-input']), allowPopupReplies:Boolean(values['enable-text-input']), allowProjectCreation: Boolean(values.launch), allowModelSettings: Boolean(values.launch), mapGpuPaths: true, prefetchHistory: true, refreshCatalog: true,
+const hub = new TaskHub({seconds, allowActivation: true, allowArchiving: Boolean(values.launch), allowNewTasks:Boolean(values['enable-text-input']), allowCommandApprovals:Boolean(values['enable-text-input']), allowComputerApprovals:Boolean(values['enable-text-input']), allowPermissionsApprovals:Boolean(values['enable-text-input']), allowPopupReplies:Boolean(values['enable-text-input']), allowProjectCreation: Boolean(values.launch), allowModelSettings: Boolean(values.launch), mapGpuPaths: true, prefetchHistory: true, refreshCatalog: true,
   canRefreshCatalog: () => wsClients > 0,
   catalogFilter: rows => Date.now() < revealAt ? rows.filter(row => row.id !== GPU_THREAD) : rows});
 report.historyPrefetch = {cached: 0, queued: 0, bytes: 0, failures: [],
@@ -275,6 +275,12 @@ hub.on('catalogChanged', rows => {
   if (stopping || !server) return;
   const sent = server.notifyTaskNames(rows);
   report.catalogNotifications = [...(report.catalogNotifications ?? []), {...sent, ids: rows.map(row => row.id).slice(0, 100), at: new Date().toISOString()}].slice(-40);
+  record();
+});
+hub.on('archiveChanged', event => {
+  if (stopping || !server) return;
+  const notification = server.notifyArchiveState(event.threadId, event.archived);
+  report.archiveOperations = [...(report.archiveOperations ?? []), {...event, ...notification, at: new Date().toISOString()}].slice(-50);
   record();
 });
 hub.on('retention', event => {

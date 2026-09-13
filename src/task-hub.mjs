@@ -13,6 +13,7 @@ import {HistoryPrefetch} from './history-prefetch.mjs';
 import {CatalogPoller} from './catalog-poller.mjs';
 import {DesktopRecentOrder} from './desktop-recent-order.mjs';
 import {projectWriteRoute} from './project-write-policy.mjs';
+import {archiveWriteRoute, archiveResponse} from './archive-policy.mjs';
 import {GpuPathMapper} from './gpu-path-mapper.mjs';
 import {defaultModelWrite, modelSettings, modelCondition} from './model-settings.mjs';
 import {commandApprovalFromFollower, approvalKey, sameApprovalDecision} from './command-approval.mjs';
@@ -23,7 +24,7 @@ import {popupReplyFromFollower} from './popup-replies.mjs';
 export class TaskHub extends EventEmitter {
   constructor({seconds = 28800, createConnection, allowActivation = false, warmRetentionMs = 600000, maxWarmTasks = 6,
     prefetchHistory = false, createHistoryConnection, refreshCatalog = false, canRefreshCatalog = () => true,
-    catalogFilter = rows => rows, maxParkedHistories = 6, allowProjectCreation = false, allowModelSettings = false, mapGpuPaths = false, pathMapper, allowNewTasks = false, allowCommandApprovals = false, allowComputerApprovals = false, allowPermissionsApprovals = false, allowPopupReplies = false} = {}) {
+    catalogFilter = rows => rows, maxParkedHistories = 6, allowProjectCreation = false, allowModelSettings = false, mapGpuPaths = false, pathMapper, allowNewTasks = false, allowCommandApprovals = false, allowComputerApprovals = false, allowPermissionsApprovals = false, allowPopupReplies = false, allowArchiving = false} = {}) {
     if (!Number.isInteger(warmRetentionMs) || warmRetentionMs < 1000 || warmRetentionMs > 600000 ||
         !Number.isInteger(maxWarmTasks) || maxWarmTasks < 0 || maxWarmTasks > 6 ||
         !Number.isInteger(maxParkedHistories) || maxParkedHistories < 0 || maxParkedHistories > 6) throw new Error('Invalid recent task retention limits');
@@ -34,6 +35,7 @@ export class TaskHub extends EventEmitter {
     this.warmRetentionMs = warmRetentionMs; this.maxWarmTasks = maxWarmTasks;
     this.maxParkedHistories = maxParkedHistories;
     this.allowActivation = allowActivation;
+    this.allowArchiving = allowArchiving; this.archiveRequests = new Map(); this.archivedIds = new Set();
     this.allowProjectCreation = allowProjectCreation;
     this.allowModelSettings = allowModelSettings;
     this.allowNewTasks=allowNewTasks;this.newTasks=new Set();this.creations=new Map();this.firstTurns=new SubmissionRegistry();
@@ -112,6 +114,7 @@ export class TaskHub extends EventEmitter {
     if (!this.connection.online || this.closed) return;
     this.pruneWarmTasks(now);
     for (const task of this.tasks.values()) {
+      if (this.archivedIds.has(task.id)) continue;
       // An app can re-follow its cached conversation without owner discovery.
       if (task.policy.followers.size) task.desired = true;
       if (task.desired && !task.policy.online && !task.pending && !task.blocked && now >= task.retryAt) this.prepare(task.id, {touch: false, activate: this.allowActivation && task.policy.followers.size > 0}).catch(() => {});
@@ -153,6 +156,7 @@ export class TaskHub extends EventEmitter {
   follow(message) {
     if (this.closed) return false;
     const id = message?.params?.conversationId;
+    if (this.archivedIds.has(id)) return false;
     let task = this.tasks.get(id);
     if (!task) {
       // The official view announces its active conversation before its slower
@@ -192,6 +196,8 @@ export class TaskHub extends EventEmitter {
   acceptCatalog(result, params) {
     if (this.closed) return;
     for (const thread of result.data ?? []) if (UUID.test(thread.id ?? '')) {
+      // A fresh active catalog also observes restoration from another device.
+      if (params?.archived !== true) this.archivedIds.delete(thread.id);
       this.knownIds.add(thread.id); this.titles.set(thread.id, String(thread.name ?? thread.preview ?? 'GPU 작업').slice(0, 160));
     }
     if (params?.archived !== true) this.history?.enqueue(result.data ?? []);
@@ -213,6 +219,45 @@ export class TaskHub extends EventEmitter {
     return task;
   }
   async read(method, params, context={}) {
+    if (method === 'thread/archive' || method === 'thread/unarchive') {
+      const write = archiveWriteRoute(method, params);
+      if (!this.allowArchiving || this.closed || !this.connection.online ||
+          typeof context.requestKey !== 'string' || !context.requestKey.length || context.requestKey.length > 300)
+        throw Error('GPU 보관 연결을 사용할 수 없어 요청을 보내지 않았습니다');
+      const fingerprint = JSON.stringify(write), previous = this.archiveRequests.get(context.requestKey);
+      if (previous) {
+        if (previous.fingerprint !== fingerprint) throw Error('Archive request ID reused with different data');
+        return previous.promise;
+      }
+      if (this.archiveRequests.size >= 1000) throw Error('Archive request limit reached; restart the connection');
+      const operationId = randomUUID();
+      const promise = Promise.resolve().then(async () => {
+        try {
+          const result = archiveResponse(method, params, await this.connection.request('archiveWrite', {operationId, ...write}));
+          const archived = method === 'thread/archive';
+          if (archived) {
+            this.archivedIds.add(params.threadId); this.knownIds.delete(params.threadId); this.history?.remove(params.threadId);
+            const task = this.tasks.get(params.threadId);
+            if (task) {
+              task.observationGeneration++; task.desired = false; task.policy.followers.clear(); task.policy.disconnect();
+              for (const timer of task.viewFastTimers) clearTimeout(timer);
+              task.viewRefreshUntil = 0;
+              // No active viewer should revive the archived conversation on a
+              // maintenance tick or accept an older in-flight watch response.
+              this.connection.request('unwatch', {threadId: task.id}).catch(() => {});
+            }
+          } else {
+            this.archivedIds.delete(params.threadId); this.knownIds.add(params.threadId);
+          }
+          this.emit('archiveChanged', {threadId: params.threadId, archived});
+          return result;
+        } finally {
+          this.metadataCache.clear(); this.taskListCache.clear(); this.catalogPoller?.invalidate();
+          this.orderGeneration++; this.desktopOrder.clear(); this.orderPending = null;
+        }
+      });
+      this.archiveRequests.set(context.requestKey, {fingerprint, promise}); return promise;
+    }
     if(method==='thread/start') {
       if(!this.allowNewTasks || !this.allowActivation || !this.connection.online || this.closed || typeof context.requestKey!=='string' || context.requestKey.length>300)
         throw Error('gpu-guard-denied: new GPU task creation unavailable');
@@ -333,6 +378,7 @@ export class TaskHub extends EventEmitter {
     task.viewRefreshAt = now + 1000; task.viewRefreshUntil = now + 45000;
   }
   prepare(id, {activate = false, touch = true} = {}) {
+    if (this.archivedIds.has(id)) return Promise.reject(new Error('이 작업은 보관되었습니다. 보관을 해제한 뒤 열어 주세요'));
     if (activate && !this.allowActivation) return Promise.reject(new Error('GPU task opening is disabled'));
     const task = this.task(id); if (touch) task.lastUsed = Date.now(); task.desired = true;
     if (task.blocked || this.closed) return Promise.reject(new Error('GPU task identity changed; restart explicitly'));

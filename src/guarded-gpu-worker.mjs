@@ -13,6 +13,7 @@ import {PersistentTaskOpener} from './persistent-task-opener.mjs';
 import {observeReadySession} from './observation-readiness.mjs';
 import {storedHistoryPreview} from './stored-history-preview.mjs';
 import {GpuProjectWriter} from './gpu-project-writer.mjs';
+import {GpuArchiveWriter} from './gpu-archive-writer.mjs';
 import {readGpuShareRoots} from './gpu-share-roots.mjs';
 import {GpuModelSettings} from './model-settings.mjs';
 import {GpuNewTasks,createEmptyGpuTask} from './gpu-new-task.mjs';
@@ -34,6 +35,8 @@ const {executable:cliPath}=discoverCli();
 const cli = spawn(cliPath, ['app-server', '--listen', 'stdio://'], {windowsHide: true, stdio: ['pipe', 'pipe', 'pipe']});
 const rpc = new RpcPeer(message => cli.stdin.write(JSON.stringify(message) + '\n'));
 const models = new GpuModelSettings((method, params) => rpc.request(method, params));
+const archiveWriter = new GpuArchiveWriter({request: (method, params) => rpc.request(method, params),
+  journalDirectory: path.join(process.env.LOCALAPPDATA, 'CodexSessionBridge', 'archive-journal')});
 const approvals = new CommandApprovalJournal(path.join(process.env.LOCALAPPDATA, 'CodexSessionBridge', 'command-approval-journal'));
 const computerApprovals = new ComputerApprovalJournal(path.join(process.env.LOCALAPPDATA, 'CodexSessionBridge', 'computer-approval-journal'));
 const permissionsApprovals = new PermissionsApprovalJournal(path.join(process.env.LOCALAPPDATA, 'CodexSessionBridge', 'permissions-approval-journal'));
@@ -116,6 +119,10 @@ async function handle(message) {
     return snapshotFor(id, await observeTask(id));
   }
   if (mode === 'catalog') throw new Error('Catalog connection is read-only');
+  if (mode === 'hub' && message.method === 'archiveWrite') {
+    await initialize();
+    return archiveWriter.handle(message.params);
+  }
   if(mode==='hub'&&message.method==='createTask') {
     await initialize();await models.validate(message.params?.params?.model?{model:message.params.params.model}:{});
     return newTasks.handle(message.params);

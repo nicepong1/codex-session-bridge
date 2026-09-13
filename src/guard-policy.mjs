@@ -1,4 +1,5 @@
 import {projectWriteRoute} from './project-write-policy.mjs';
+import {archiveWriteRoute} from './archive-policy.mjs';
 import {defaultModelWrite} from './model-settings.mjs';
 import {newTaskParams,firstTaskTurn} from './new-task-policy.mjs';
 export const GPU_THREAD = '00000000-0000-4000-8000-000000000001';
@@ -71,6 +72,7 @@ export function hubReadRoute(method, params = {}) {
 // The isolated desktop's open request is translated into an official GPU app
 // navigation action. It is never passed to a CLI thread/resume endpoint.
 export function desktopHubRoute(method, params) {
+  if (method === 'thread/archive' || method === 'thread/unarchive') return {write: true, ...archiveWriteRoute(method, params)};
   // The hub must separately authorize creation and verify a bridge-created ID
   // for the first turn. These routes never reach the general metadata proxy.
   if (method === 'thread/start') return {newTask: true, method, params:newTaskParams(params)};

@@ -37,7 +37,7 @@ export class TaskHub extends EventEmitter {
     this.allowProjectCreation = allowProjectCreation;
     this.allowModelSettings = allowModelSettings;
     this.allowNewTasks=allowNewTasks;this.newTasks=new Set();this.creations=new Map();this.firstTurns=new SubmissionRegistry();
-    this.lastSelectedAt = 0; this.commandApprovals = new Map(); this.allowCommandApprovals = allowCommandApprovals;
+    this.lastSelectedAt = 0; this.observationGeneration = 0; this.commandApprovals = new Map(); this.allowCommandApprovals = allowCommandApprovals;
     this.computerApprovals = new Map(); this.allowComputerApprovals = allowComputerApprovals;
     this.permissionsApprovals = new Map(); this.allowPermissionsApprovals = allowPermissionsApprovals;
     this.popupReplies = new Map(); this.allowPopupReplies = allowPopupReplies;
@@ -56,8 +56,9 @@ export class TaskHub extends EventEmitter {
     this.pathMapper = pathMapper ?? (mapGpuPaths ? new GpuPathMapper({
       readShares: names => this.connection.request('shareRoots', {names}),
       onResolved: mappings => this.emit('pathMappings', mappings)}) : null);
-    this.connection.on('offline', reason => { this.metadataCache.clear(); this.taskListCache.clear(); this.history?.invalidate(); this.catalogPoller?.invalidate(); for (const task of this.tasks.values()) if (task.desired) this.markOffline(task, reason); });
+    this.connection.on('offline', reason => { this.observationGeneration++; this.metadataCache.clear(); this.taskListCache.clear(); this.history?.invalidate(); this.catalogPoller?.invalidate(); for (const task of this.tasks.values()) if (task.desired) this.markOffline(task, reason); });
     this.connection.on('state', state => {
+      if (state.status !== 'online') this.observationGeneration++;
       this.pathMapper?.invalidate();
       this.orderGeneration++; this.desktopOrder.clear(); this.orderPending = null;
       this.metadataCache.clear();
@@ -67,7 +68,7 @@ export class TaskHub extends EventEmitter {
       this.emit('connection', state);
       if (state.status === 'online') {
         this.pruneWarmTasks();
-        for (const task of this.tasks.values()) if (task.desired && !task.blocked) this.prepare(task.id, {touch: false}).catch(() => {});
+        for (const task of this.tasks.values()) if (task.desired && !task.blocked) this.prepare(task.id, {touch: false, activate: this.allowActivation && task.policy.followers.size > 0}).catch(() => {});
       }
     });
     if (prefetchHistory) {
@@ -113,7 +114,7 @@ export class TaskHub extends EventEmitter {
     for (const task of this.tasks.values()) {
       // An app can re-follow its cached conversation without owner discovery.
       if (task.policy.followers.size) task.desired = true;
-      if (task.desired && !task.policy.online && !task.pending && !task.blocked && now >= task.retryAt) this.prepare(task.id, {touch: false}).catch(() => {});
+      if (task.desired && !task.policy.online && !task.pending && !task.blocked && now >= task.retryAt) this.prepare(task.id, {touch: false, activate: this.allowActivation && task.policy.followers.size > 0}).catch(() => {});
       // The desktop's pending resume/history promise can settle after the first
       // IPC snapshot. Re-send fresh revisions briefly, after that promise settles.
       if (task.policy.online && !task.blocked && task.policy.followers.size && now < task.viewRefreshUntil && now >= task.viewRefreshAt) {
@@ -205,7 +206,7 @@ export class TaskHub extends EventEmitter {
     let task = this.tasks.get(id);
     if (!task) {
       task = {id, policy: new NativeViewPolicy(id), title: this.titles.get(id) ?? 'GPU 작업', desired: false, pending: null,
-        blocked: false, parked: false, releasing: null, retryAt: 0, lastUsed: Date.now(), error: null,
+        blocked: false, parked: false, releasing: null, retryAt: 0, lastUsed: Date.now(), error: null, observationGeneration: 0,
         viewRefreshUntil: 0, viewRefreshAt: 0, viewRefreshCount: 0, viewFastTimers: []};
       this.tasks.set(id, task);
     }
@@ -341,10 +342,14 @@ export class TaskHub extends EventEmitter {
     task.pending = (async () => {
       await task.releasing;
       await this.connection.waitUntilReady();
+      const generation = this.observationGeneration;
+      const taskGeneration = task.observationGeneration;
       if (activate) this.emit('activation', {threadId: id, state: 'opening'});
       const snapshot = await this.connection.request(activate ? 'activate' : 'watch', {threadId: id});
+      if (this.closed || !this.connection.online || generation !== this.observationGeneration || taskGeneration !== task.observationGeneration) throw new Error('GPU observation connection changed');
+      if (snapshot?.threadId !== id) throw new Error('GPU observation response task mismatch');
       // A newer streamed snapshot may precede the response to an already-open watch.
-      if (!task.policy.online || snapshot.revision >= task.policy.sourceRevision) this.accept(snapshot);
+      if (!task.policy.online || snapshot.revision >= task.policy.sourceRevision) this.accept(snapshot, {freshObservation: true});
       if (!task.policy.online) throw new Error(task.error ?? 'GPU observation unavailable');
       if (activate) this.emit('activation', {threadId: id, state: 'opened', owner: task.policy.owner});
       return task;
@@ -355,11 +360,16 @@ export class TaskHub extends EventEmitter {
     }).finally(() => { task.pending = null; this.pruneWarmTasks(); });
     return task.pending;
   }
-  accept(snapshot) {
+  accept(snapshot, {freshObservation = false} = {}) {
     const task = this.tasks.get(snapshot.threadId);
     if (!task || !task.desired || task.blocked || this.closed) return;
+    // A replacement observation may stream before its watch/activate response.
+    // Wait for the correlated response before accepting a lower baseline. Never
+    // let an unsolicited broadcast reset it or change the original owner.
+    if (!freshObservation && !task.policy.online && task.policy.owner === snapshot.ownerClientId &&
+        Number.isSafeInteger(snapshot.revision) && snapshot.revision >= 0 && snapshot.revision < task.policy.sourceRevision) return;
     try {
-      task.policy.acceptSnapshot(snapshot); task.title = snapshot.state.title || 'GPU 작업'; task.error = null; task.parked = false;
+      task.policy.acceptSnapshot(snapshot, {freshObservation}); task.title = snapshot.state.title || 'GPU 작업'; task.error = null; task.parked = false;
       this.emit('snapshot', task);
     } catch {
       task.blocked = true; this.markOffline(task, 'GPU task identity or revision changed');
@@ -368,6 +378,7 @@ export class TaskHub extends EventEmitter {
   }
   markOffline(task, reason) {
     if (!task || this.closed) return;
+    task.observationGeneration++;
     task.policy.disconnect(); task.error = reason;
     this.emit('snapshot', task); this.emit('taskError', {threadId: task.id, reason});
   }

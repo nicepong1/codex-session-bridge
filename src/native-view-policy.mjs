@@ -17,13 +17,17 @@ export class NativeViewPolicy {
     this.followers = new Set();
   }
 
-  acceptSnapshot(message) {
+  acceptSnapshot(message, {freshObservation = false} = {}) {
     if (message.type !== 'snapshot' || !supportedHostVersion(message.appVersion) ||
         message.threadId !== this.threadId || message.state?.id !== this.threadId ||
         message.state?.sessionId !== this.threadId || !message.ownerClientId ||
         !Number.isSafeInteger(message.revision) || message.revision < 0) throw new Error('GPU snapshot identity/version mismatch');
     if (this.owner && this.owner !== message.ownerClientId) throw new Error('GPU owner changed; reconnect explicitly');
-    if (message.revision < this.sourceRevision) throw new Error('GPU revision moved backwards');
+    // Reopening the same stored conversation can restart its app-side revision.
+    // Only a correlated, freshly resumed observation may establish that baseline;
+    // broadcasts and snapshots received while already online remain monotonic.
+    const canReset = freshObservation && !this.online && message.state.resumeState === 'resumed';
+    if (message.revision < this.sourceRevision && !canReset) throw new Error('GPU revision moved backwards');
     this.owner = message.ownerClientId;
     this.sourceRevision = message.revision;
     this.state = structuredClone(message.state);

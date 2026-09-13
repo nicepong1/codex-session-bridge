@@ -32,7 +32,7 @@ ssh-add "$env:USERPROFILE\.ssh\id_ed25519"
 
 ## 3. 호스트 설치
 
-1. GitHub Releases에서 `codex-session-bridge-0.19.0-windows-x64.zip`과 `.sha256` 파일을 받습니다. ZIP의 `Get-FileHash -Algorithm SHA256` 결과를 체크섬 파일과 비교합니다.
+1. GitHub Releases에서 `codex-session-bridge-0.19.1-windows-x64.zip`과 `.sha256` 파일을 받습니다. ZIP의 `Get-FileHash -Algorithm SHA256` 결과를 체크섬 파일과 비교합니다.
 2. ZIP을 **압축 해제**합니다. 압축 파일 안에서 직접 실행하지 않습니다.
 3. `Install.cmd`를 두 번 클릭하고 `2`를 입력합니다. 프로그램은 현재 Windows 사용자의 LocalAppData에 설치됩니다.
 4. 설치 화면에 표시되는 Windows 사용자명, Tailscale 주소, `SHA256:...` 형식의 SSH 호스트 지문을 확인합니다. 다시 보려면 설치 폴더의 `Show-HostInfo.cmd`를 실행합니다.

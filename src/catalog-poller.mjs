@@ -26,10 +26,12 @@ export class CatalogPoller extends EventEmitter {
           if (!UUID.test(row?.id ?? '') || !UUID.test(row.sessionId ?? row.id) || typeof row.title !== 'string' || row.title.length > 160 ||
               (row.cwd != null && (typeof row.cwd !== 'string' || row.cwd.length > 4096)) ||
               (row.projectId != null && !UUID.test(row.projectId)) ||
-              (row.updatedAt != null && !Number.isFinite(row.updatedAt))) throw new Error('Invalid catalog row');
+              (row.updatedAt != null && !Number.isFinite(row.updatedAt)) ||
+              (row.recencyAt != null && !Number.isFinite(row.recencyAt))) throw new Error('Invalid catalog row');
           rows.set(row.id, {id: row.id, sessionId: row.sessionId ?? row.id, title: row.title, cwd: row.cwd ?? null,
             ...(row.projectId != null ? {projectId: row.projectId} : {}),
-            ...(Number.isFinite(row.createdAt) ? {createdAt: row.createdAt} : {}), updatedAt: row.updatedAt ?? null});
+            ...(Number.isFinite(row.createdAt) ? {createdAt: row.createdAt} : {}), updatedAt: row.updatedAt ?? null,
+            ...(Number.isFinite(row.recencyAt) ? {recencyAt: row.recencyAt} : {})});
         }
         cursor = result.nextCursor ?? null;
         if (cursor && (cursor.length > 4096 || cursors.has(cursor))) throw new Error('Invalid catalog cursor');

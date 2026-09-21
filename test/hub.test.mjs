@@ -38,8 +38,8 @@ test('first recent page returns without a full catalog scan; background ordering
   t.after(() => hub.close());
   connection.request = async (method, params) => {
     connection.calls.push({method, params});
-    if (method === 'catalog') return params.cursor ? {tasks:[{id:second,updatedAt:90}],nextCursor:null}
-      : {tasks:[{id:GPU_THREAD,updatedAt:100}],nextCursor:'second'};
+    if (method === 'catalog') return params.cursor ? {tasks:[{id:second,updatedAt:90,recencyAt:60}],nextCursor:null}
+      : {tasks:[{id:GPU_THREAD,updatedAt:100,recencyAt:70}],nextCursor:'second'};
     if (method === 'read' && params.method === 'thread/list') return {data:[{id:GPU_THREAD,updatedAt:100,recencyAt:2}],nextCursor:null};
     if (method === 'read' && params.method === 'thread/read') return {thread:{id:GPU_THREAD,updatedAt:2,turns:[]}};
     throw new Error('Unexpected operation');
@@ -47,8 +47,8 @@ test('first recent page returns without a full catalog scan; background ordering
   history.request = async (method, params) => {
     history.calls.push({method, params});
     if (method !== 'catalog') throw new Error('Unexpected history operation');
-    return params.cursor ? {tasks:[{id:second,title:'두 번째',updatedAt:90}],nextCursor:null}
-      : {tasks:[{id:GPU_THREAD,title:'첫 번째',updatedAt:100}],nextCursor:'second'};
+    return params.cursor ? {tasks:[{id:second,title:'두 번째',updatedAt:90,recencyAt:60}],nextCursor:null}
+      : {tasks:[{id:GPU_THREAD,title:'첫 번째',updatedAt:100,recencyAt:70}],nextCursor:'second'};
   };
   const a = await hub.read('thread/list',{});
   assert.equal(connection.calls.filter(c=>c.method==='catalog').length,0);
@@ -57,7 +57,7 @@ test('first recent page returns without a full catalog scan; background ordering
   const b = await hub.read('thread/list',{});
   assert.equal(history.calls.filter(c=>c.method==='catalog').length,2);
   assert.notEqual(b.data[0].recencyAt,a.data[0].recencyAt);
-  assert.equal(b.data[0].recencyAt,100.25);
+  assert.equal(b.data[0].recencyAt,70.25);
   const single = await hub.read('thread/read',{threadId:GPU_THREAD,includeTurns:false});
   assert.equal(single.thread.recencyAt,b.data[0].recencyAt);
   assert.equal(single.thread.updatedAt,100);

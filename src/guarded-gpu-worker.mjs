@@ -23,6 +23,7 @@ import {CommandApprovalJournal, verifyCommandApproval} from './command-approval.
 import {ComputerApprovalJournal, verifyComputerApproval} from './computer-approval.mjs';
 import {PermissionsApprovalJournal, verifyPermissionsApproval} from './permissions-approval.mjs';
 import {PopupReplyJournal,verifyPopupReply} from './popup-replies.mjs';
+import {recoverMissingAgentThreads} from './orphan-task-recovery.mjs';
 import {setTimeout as delay} from 'node:timers/promises';
 
 const [threadId, duration, mode = 'session'] = process.argv.slice(2);
@@ -99,7 +100,8 @@ async function handle(message) {
       sortKey: 'updated_at', useStateDbOnly: false});
     return {tasks: (result.data ?? []).filter(t => UUID.test(t.id ?? '') && !t.ephemeral).map(t => ({id: t.id,
       sessionId: t.sessionId ?? t.id, title: String(t.name ?? t.preview ?? '제목 없음').slice(0, 160),
-      cwd: t.cwd ?? null, projectId: t.projectId ?? null, createdAt: t.createdAt ?? null, updatedAt: t.updatedAt ?? null})), nextCursor: result.nextCursor ?? null};
+      cwd: t.cwd ?? null, projectId: t.projectId ?? null, createdAt: t.createdAt ?? null, updatedAt: t.updatedAt ?? null,
+      recencyAt: t.recencyAt ?? null})), nextCursor: result.nextCursor ?? null};
   }
   if (mode === 'history') {
     const id = message.params?.threadId;
@@ -184,6 +186,8 @@ async function handle(message) {
     await initialize();
     const result = await rpc.request(route.method, route.params);
     if (route.method === 'thread/turns/list') return verifiedTurnPage(result, route.params);
+    if (mode === 'hub' && route.method === 'thread/list') return recoverMissingAgentThreads({page: result, params: route.params,
+      readThread: id => rpc.request('thread/read', {threadId: id, includeTurns: false})});
     if (route.list) return {data: [result.thread], nextCursor: null};
     return result;
   }

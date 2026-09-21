@@ -327,6 +327,8 @@ export class TaskHub extends EventEmitter {
       throw new Error('GPU 공식 앱에서 작업을 열었습니다. 기존 세션에 연결하는 중입니다.');
     }
     hubReadRoute(method, params);
+    if (method === 'thread/turns/list' && !this.knownIds.has(params.threadId))
+      throw new Error('gpu-guard-denied: unknown task history');
     // Do not let an offline cache hide a lost GPU connection.
     await this.connection.waitUntilReady();
     if (this.closed || !this.connection.online) throw new Error('GPU read connection unavailable');

@@ -6,6 +6,7 @@ import {TaskHub} from '../src/task-hub.mjs';
 import {hubReadRoute, GPU_THREAD} from '../src/guard-policy.mjs';
 import {TESTED_APP_VERSION} from '../src/installed.mjs';
 import {storedHistoryPreview} from '../src/stored-history-preview.mjs';
+import {verifiedTurnPage} from '../src/thread-history-policy.mjs';
 const second = '714adca2-1120-4134-83ad-82c84799ea63';
 function snapshot(id, revision = 1, owner = 'owner-' + id) {
   return {type: 'snapshot', threadId: id, appVersion: TESTED_APP_VERSION, ownerClientId: owner, revision,
@@ -22,6 +23,7 @@ class FakeConnection extends EventEmitter {
     if (method === 'catalog') return {tasks: [{id: GPU_THREAD}, {id: second}], nextCursor: null};
     if (method === 'read' && params.method === 'thread/list') return {data: [{id: GPU_THREAD}, {id: second}], nextCursor: 'next'};
     if (method === 'read' && params.method === 'thread/read') return {thread: {id: params.params.threadId}};
+    if (method === 'read' && params.method === 'thread/turns/list') return {data:[{id:'older-turn',items:[]}],nextCursor:null,backwardsCursor:'newer'};
     return {};
   }
   close() { this.closed = true; }
@@ -95,6 +97,28 @@ test('hub read routes preserve pagination and archives while rejecting mutations
   for (const method of ['thread/resume', 'thread/start', 'turn/start', 'command/exec', 'fs/writeFile']) assert.throws(() => hubReadRoute(method, {threadId: second}));
   assert.throws(() => hubReadRoute('thread/read', {threadId: '../other'}));
   assert.throws(() => hubReadRoute('thread/list', {limit: 100000}));
+});
+test('older turn pages are bounded read-only queries and never activate or execute a task', async t => {
+  const {hub, connection} = setup(t); hub.knownIds.add(second);
+  const params={threadId:second,cursor:'older',limit:20,sortDirection:'desc',itemsView:'full'};
+  assert.deepEqual(hubReadRoute('thread/turns/list',params),{method:'thread/turns/list',params});
+  const page=await hub.read('thread/turns/list',params);
+  assert.equal(page.data[0].id,'older-turn');
+  assert.deepEqual(connection.calls,[{method:'read',params:{method:'thread/turns/list',params}}]);
+  assert.equal(hub.tasks.size,0);
+  assert.equal(connection.calls.some(call=>['watch','activate','submitText'].includes(call.method)),false);
+});
+test('turn history rejects unknown tasks, extra parameters, invalid cursors, oversized limits and malformed pages', async t => {
+  const {hub,connection}=setup(t);
+  await assert.rejects(hub.read('thread/turns/list',{threadId:second,limit:20}),/unknown task history/);
+  assert.equal(connection.calls.length,0);
+  for(const params of [
+    {threadId:second,limit:0},{threadId:second,limit:201},{threadId:second,cursor:''},
+    {threadId:second,sortDirection:'sideways'},{threadId:second,itemsView:'raw'},{threadId:second,unexpected:true},
+  ])assert.throws(()=>hubReadRoute('thread/turns/list',params),/invalid turn history query/);
+  assert.throws(()=>verifiedTurnPage({data:[{id:'same'},{id:'same'}],nextCursor:null,backwardsCursor:null},{limit:2}),/Invalid/);
+  assert.throws(()=>verifiedTurnPage({data:[{id:'one'},{id:'two'}],nextCursor:null,backwardsCursor:null},{limit:1}),/Invalid/);
+  assert.throws(()=>verifiedTurnPage({data:[],nextCursor:'',backwardsCursor:null},{limit:1}),/Invalid/);
 });
 test('listing all GPU tasks does not start or observe any task', async t => {
   const {hub, connection} = setup(t), result = await hub.read('thread/list', {});

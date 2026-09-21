@@ -6,11 +6,11 @@
 
 > 독립적으로 개발한 실험적 도구입니다. OpenAI 공식 제품이 아니며, Codex 데스크톱의 비공개 연결 규약을 사용합니다. 현재 검증한 Windows 앱 버전만 지원합니다. 설치 전 [호환성 표](docs/COMPATIBILITY.md)를 확인하세요.
 
-**[설치 파일 다운로드](https://github.com/nicepong1/codex-session-bridge/releases/tag/v0.19.3)** · **[사용설명서](docs/USER-GUIDE.md)** · **[문제 해결](docs/TROUBLESHOOTING.md)** · **[앱 개요와 구조](docs/OVERVIEW.md)**
+**[설치 파일 다운로드](https://github.com/nicepong1/codex-session-bridge/releases/tag/v0.19.4)** · **[사용설명서](docs/USER-GUIDE.md)** · **[문제 해결](docs/TROUBLESHOOTING.md)** · **[앱 개요와 구조](docs/OVERVIEW.md)**
 
 ## 할 수 있는 일
 
-- 호스트의 기존 작업과 프로젝트 목록 조회, 작업 선택 및 본문 사전 읽기
+- 호스트의 기존 작업과 프로젝트 목록 조회, 작업 선택, 본문 사전 읽기와 긴 대화의 과거 내용 불러오기
 - 같은 작업에 텍스트 지시 전송, 새 작업 생성 및 첫 입력 전달
 - 모델과 추론 수준 변경, 호스트 프로젝트 등록
 - 명령·파일 변경·추가 권한 승인, 질문 답변, 일반 MCP 폼·URL 확인 전달
@@ -31,7 +31,7 @@ Node.js와 JavaScript 의존성은 릴리스 ZIP에 포함됩니다. Codex, Tail
 
 ## 지원 범위
 
-| 항목 | 릴리스 0.19.3 |
+| 항목 | 릴리스 0.19.4 |
 |---|---|
 | 노트북/호스트 OS | Windows x64 |
 | 노트북 Codex 앱 | 26.901.5280.0, 26.901.6511.0, 26.908.4834.0, 26.908.9136.0, 26.915.4065.0 |

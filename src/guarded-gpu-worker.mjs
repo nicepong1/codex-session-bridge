@@ -6,6 +6,7 @@ import {StringDecoder} from 'node:string_decoder';
 import {encodeSshFrame, SshFrameDecoder} from './ssh-framing.mjs';
 import {RpcPeer} from './json-rpc-peer.mjs';
 import {readRoute, hubReadRoute, UUID} from './guard-policy.mjs';
+import {verifiedTurnPage} from './thread-history-policy.mjs';
 import {installedDesktop, discoverCli, TESTED_APP_VERSION, BRIDGE_VERSION} from './installed.mjs';
 import {observeSession} from '../diagnostics/observe-session.mjs';
 import {TaskActivation} from './task-activation.mjs';
@@ -182,6 +183,7 @@ async function handle(message) {
     if (route.method === 'initialize') return initialize(route.params);
     await initialize();
     const result = await rpc.request(route.method, route.params);
+    if (route.method === 'thread/turns/list') return verifiedTurnPage(result, route.params);
     if (route.list) return {data: [result.thread], nextCursor: null};
     return result;
   }

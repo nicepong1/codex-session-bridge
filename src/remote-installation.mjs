@@ -10,7 +10,7 @@ export function resolvedProfile(profile=loadProfile()){
 }
 export async function prepareRemoteProfile(profile=loadProfile()){
  if(profile.remoteInstallPath){resolved.set(profile.id,profile);return profile}
- const ps="$ErrorActionPreference='Stop';$ProgressPreference='SilentlyContinue';[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false);$h=Get-Content -LiteralPath (Join-Path $env:LOCALAPPDATA 'CodexSessionBridge\\host.json') -Raw|ConvertFrom-Json;if($h.version -ne 1 -or $h.release -ne '0.19.3'){throw 'Install the same bridge release on the host'};@{installPath=$h.installPath}|ConvertTo-Json -Compress";
+ const ps="$ErrorActionPreference='Stop';$ProgressPreference='SilentlyContinue';[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false);$h=Get-Content -LiteralPath (Join-Path $env:LOCALAPPDATA 'CodexSessionBridge\\host.json') -Raw|ConvertFrom-Json;if($h.version -ne 1 -or $h.release -ne '0.19.4'){throw 'Install the same bridge release on the host'};@{installPath=$h.installPath}|ConvertTo-Json -Compress";
  const command='powershell.exe -NoLogo -NoProfile -NonInteractive -EncodedCommand '+Buffer.from(ps,'utf16le').toString('base64');
  const {stdout}=await execute('ssh',sshArguments(profile,command),{windowsHide:true,timeout:20000,maxBuffer:16384});
  const value=JSON.parse(stdout.trim()),p=validateProfile({...profile,remoteInstallPath:value.installPath});

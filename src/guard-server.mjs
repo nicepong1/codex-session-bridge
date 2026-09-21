@@ -72,6 +72,9 @@ export async function startGuardServer({read, threadId = GPU_THREAD, route = (me
             sortKey: message.params?.sortKey ?? null, sortDirection: message.params?.sortDirection ?? null,
             returnedCount: result?.data?.length ?? null, hasMore: result?.nextCursor != null} : {}),
           ...(message.method === 'thread/read' ? {threadId: message.params.threadId, includeTurns: Boolean(message.params.includeTurns)} : {}),
+          ...(message.method === 'thread/turns/list' ? {threadId: message.params.threadId, limit: message.params.limit ?? null,
+            sortDirection: message.params.sortDirection ?? null, itemsView: message.params.itemsView ?? null,
+            hasCursor: message.params.cursor != null, returnedCount: result?.data?.length ?? null, hasMore: result?.nextCursor != null} : {}),
           ...(['thread/archive','thread/unarchive'].includes(message.method) ? {threadId: message.params.threadId} : {})});
         if (ws.readyState === ws.OPEN) {
           ws.send(JSON.stringify({id: message.id, result}));
@@ -85,7 +88,7 @@ export async function startGuardServer({read, threadId = GPU_THREAD, route = (me
       } catch (error) {
         if (beganInitialize) initializing = false;
         onRequest({method: message?.method ?? 'invalid', allowed: false, elapsedMs: Math.round(performance.now() - started),
-          ...(['thread/resume','turn/start','thread/archive','thread/unarchive'].includes(message?.method) && typeof message.params?.threadId === 'string' ? {threadId: message.params.threadId} : {}),
+          ...(['thread/resume','thread/turns/list','turn/start','thread/archive','thread/unarchive'].includes(message?.method) && typeof message.params?.threadId === 'string' ? {threadId: message.params.threadId} : {}),
           ...(['thread/start','turn/start'].includes(message?.method) ? {detail:error.message,paramKeys:Object.keys(message.params??{}),cwd:message.params?.cwd,permissions:message.params?.permissions,sandbox:message.params?.sandbox} : {}),
           reason: error.message === 'Initialize first' ? 'initialization-required' : error.message.startsWith('gpu-guard-denied:') ? 'method-denied' : 'upstream-error'});
         if (message?.id != null && ws.readyState === ws.OPEN) ws.send(JSON.stringify({id: message.id, error: {code: -32020, message: error.message}}));

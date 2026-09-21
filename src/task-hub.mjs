@@ -20,6 +20,7 @@ import {commandApprovalFromFollower, approvalKey, sameApprovalDecision} from './
 import {computerApprovalFromFollower} from './computer-approval.mjs';
 import {permissionsApprovalFromFollower} from './permissions-approval.mjs';
 import {popupReplyFromFollower} from './popup-replies.mjs';
+import {imageFingerprint,loadLocalImages} from './image-input.mjs';
 
 export class TaskHub extends EventEmitter {
   constructor({seconds = 28800, createConnection, allowActivation = false, warmRetentionMs = 600000, maxWarmTasks = 6,
@@ -292,10 +293,11 @@ export class TaskHub extends EventEmitter {
     }
     if(method==='turn/start') {
       if(!this.allowNewTasks||!this.newTasks.has(params?.threadId))throw Error('gpu-guard-denied: Only the first input of a bridge-created task is supported');
-      const input=firstTaskTurn(params);
-      return this.firstTurns.run(input.operationId,JSON.stringify(input),async()=>{
+      const {localImages=[],...input}=firstTaskTurn(params);
+      const images=await loadLocalImages(localImages);
+      return this.firstTurns.run(input.operationId,JSON.stringify({...input,images:imageFingerprint(images)}),async()=>{
         await this.prepare(input.threadId,{activate:true});
-        const response=await this.connection.request('submitFirstText',input,30000);
+        const response=await this.connection.request('submitFirstText',{...input,...(images.length?{images}:{})});
         const result=response?.result??response;
         if(!UUID.test(result?.turn?.id??''))throw Error('First GPU input outcome unknown; do not resend');
         this.emit('newTask',{stage:'first-input-acknowledged',threadId:input.threadId,operationId:input.operationId,turnId:result.turn.id});
@@ -491,14 +493,15 @@ export class TaskHub extends EventEmitter {
     });
     registry.set(key, {decision, promise}); return promise;
   }
-  async submit(id, operationId, text, selection = {}, plan = null) {
+  async submit(id, operationId, text, selection = {}, plan = null, images = []) {
     const settings = modelSettings(selection, {empty: true});
     const task = this.tasks.get(id);
     if (!task?.policy.online || !this.connection.online || task.blocked) throw new Error('GPU task input unavailable');
     task.lastUsed = Date.now();
     if (Object.keys(settings).length && !this.allowModelSettings) throw new Error('gpu-guard-denied: model settings disabled');
-    return this.submissions.run(operationId, id + '\0' + text + JSON.stringify({settings,plan}),
-      () => this.connection.request('submitText', {threadId: id, operationId, text, ...(Object.keys(settings).length ? {settings} : {}),...(plan?{plan}:{})}));
+    return this.submissions.run(operationId, id + '\0' + text + JSON.stringify({settings,plan,images:imageFingerprint(images)}),
+      () => this.connection.request('submitText', {threadId: id, operationId, text,
+        ...(Object.keys(settings).length ? {settings} : {}),...(plan?{plan}:{}),...(images.length?{images}:{})}));
   }
   close() {
     if (this.closed) return; this.closed = true; clearInterval(this.maintenance);

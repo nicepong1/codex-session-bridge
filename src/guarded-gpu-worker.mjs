@@ -19,6 +19,8 @@ import {readGpuShareRoots} from './gpu-share-roots.mjs';
 import {GpuModelSettings} from './model-settings.mjs';
 import {GpuNewTasks,createEmptyGpuTask} from './gpu-new-task.mjs';
 import {turnsOf} from './state.mjs';
+import {verifiedInlineImages,imageFingerprint} from './image-input.mjs';
+import {SnapshotSender} from './snapshot-wire.mjs';
 import {CommandApprovalJournal, verifyCommandApproval} from './command-approval.mjs';
 import {ComputerApprovalJournal, verifyComputerApproval} from './computer-approval.mjs';
 import {PermissionsApprovalJournal, verifyPermissionsApproval} from './permissions-approval.mjs';
@@ -32,7 +34,8 @@ if (!UUID.test(threadId ?? '') || !['session', 'catalog', 'hub', 'history'].incl
 const hostDesktop=installedDesktop('host');
 const hostAppVersion=hostDesktop.versions?.[0];
 if (!hostDesktop.testedBuild) throw new Error('Unsupported host Codex build; see docs/COMPATIBILITY.md');
-const send = message => { if (process.stdout.writableLength > 32 * 1024 * 1024) throw new Error('SSH output stalled'); process.stdout.write(encodeSshFrame(message)); };
+const snapshotSender = new SnapshotSender();
+const send = message => { if (process.stdout.writableLength > 32 * 1024 * 1024) throw new Error('SSH output stalled'); process.stdout.write(encodeSshFrame(snapshotSender.encode(message))); };
 const {executable:cliPath}=discoverCli();
 const cli = spawn(cliPath, ['app-server', '--listen', 'stdio://'], {windowsHide: true, stdio: ['pipe', 'pipe', 'pipe']});
 const rpc = new RpcPeer(message => cli.stdin.write(JSON.stringify(message) + '\n'));
@@ -207,14 +210,17 @@ async function handle(message) {
       const empty=turnsOf(fresh.state.state).length===0;
       if(message.method==='submitFirstText'&&!empty)throw Error('First GPU input already exists; automatic replay refused');
       if(empty)newTasks.claimFirst(targetId,operationId);
+      const images=verifiedInlineImages(message.params?.images);
       const inputJournal=path.join(process.env.LOCALAPPDATA,'CodexSessionBridge','input-journal');
       fs.mkdirSync(inputJournal, {recursive: true});
       const journal = path.join(inputJournal, operationId + '.json');
       const fd = fs.openSync(journal, 'wx');
-      try { fs.writeSync(fd, JSON.stringify({operationId, threadId: targetId, attemptedAt: new Date().toISOString()})); fs.fsyncSync(fd); }
+      try { fs.writeSync(fd, JSON.stringify({operationId, threadId: targetId, attemptedAt: new Date().toISOString(),
+        images:imageFingerprint(message.params?.images)})); fs.fsyncSync(fd); }
       finally { fs.closeSync(fd); }
       // Record before the side effect; retries with this operation ID are always refused.
-      return await fresh.client.startTextTurn({session: fresh.state, appVersion: hostAppVersion, text, clientUserMessageId: operationId, settings,allowEmptyInitial:empty,plan:message.params?.plan??null});
+      return await fresh.client.startTextTurn({session: fresh.state, appVersion: hostAppVersion, text, clientUserMessageId: operationId,
+        settings,allowEmptyInitial:empty,plan:message.params?.plan??null,images});
     } finally { fresh?.close(); if (mode === 'hub') busyThreads.delete(targetId); else busy = false; }
   }
   throw new Error('Unknown bridge operation');
@@ -249,7 +255,7 @@ try {
   timer = setInterval(() => {
     try {
       if (mode === 'session' && (watch.error || watch.disconnected || watch.state.stale)) throw new Error('GPU owner unavailable');
-      if (mode === 'session' && watch.state.revision !== revision) {
+      if (mode === 'session' && watch.state.revision !== revision && !process.stdout.writableLength) {
         revision = watch.state.revision;
         send({type: 'snapshot', appVersion: hostAppVersion, threadId, ownerClientId: watch.state.ownerClientId, revision, state: watch.state.state});
       }
@@ -257,13 +263,15 @@ try {
         if (observation.error || observation.disconnected || observation.state.stale || observation.state.state.resumeState !== 'resumed') {
           observation.close(); watches.delete(id); send({type: 'task-offline', threadId: id}); continue;
         }
-        if (observation.state.revision !== observation.lastSentRevision) {
+        // Coalesce intermediate revisions while the pipe drains. Never queue
+        // repeated full histories behind a slow network connection.
+        if (observation.state.revision !== observation.lastSentRevision && !process.stdout.writableLength) {
           observation.lastSentRevision = observation.state.revision; send(snapshotFor(id, observation));
         }
       }
       if (Date.now() - lastHeartbeat > 3000) { send({type: 'heartbeat'}); lastHeartbeat = Date.now(); }
     } catch { finish(2); }
-  }, 80);
+  }, 150);
   lifetime = setTimeout(() => finish(0), seconds * 1000);
   process.once('SIGINT', () => finish(0)); process.once('SIGTERM', () => finish(0));
 } catch { finish(2); }

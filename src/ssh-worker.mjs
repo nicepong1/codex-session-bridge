@@ -7,6 +7,8 @@ import {loadProfile} from './connection-config.mjs';
 import {resolvedProfile} from './remote-installation.mjs';
 import {sshArguments,remoteNodeCommand} from './ssh-command.mjs';
 import {ConnectionFailureClassifier} from './connection-notice.mjs';
+import {SnapshotReceiver} from './snapshot-wire.mjs';
+import {TransportLiveness} from './transport-liveness.mjs';
 
 export class SshWorker extends EventEmitter {
   constructor({threadId, seconds = 600, mode = 'session', profile = resolvedProfile(loadProfile())}) {
@@ -20,11 +22,13 @@ export class SshWorker extends EventEmitter {
       if (!this.child.stdin.writable || this.child.stdin.writableLength > 1024 * 1024) throw new Error('SSH input unavailable');
       this.child.stdin.write(encodeSshFrame(message));
     });
-    this.lastHeartbeat = Date.now();
     const decoder = new SshFrameDecoder();
-    this.child.stdout.on('data', data => { try { decoder.push(data, msg => {
-      this.lastHeartbeat = Date.now(); this.peer.accept(msg);
-    }); } catch { this.close(); this.emit('offline', 'Invalid GPU stream'); } });
+    const snapshots = new SnapshotReceiver(), liveness = new TransportLiveness();
+    this.child.stdout.on('data', data => { try {
+      let completed = false;
+      decoder.push(data, msg => { completed = true; this.peer.accept(snapshots.decode(msg)); });
+      liveness.received(Date.now(),decoder.pending,completed);
+    } catch { this.close(); this.emit('offline', 'Invalid GPU stream'); } });
     this.peer.on('message', message => this.emit('message', message));
     this.failureKind = 'unknown';
     const failure = new ConnectionFailureClassifier();
@@ -34,8 +38,9 @@ export class SshWorker extends EventEmitter {
     this.child.stdin.on('error', () => {});
     this.child.on('error', () => { this.peer.close(); this.emit('offline', 'SSH failed'); });
     this.child.on('close', code => { clearInterval(this.monitor); this.peer.close(); this.emit('offline', 'SSH closed (' + code + ', ' + this.failureKind + ')'); });
-    this.monitor = setInterval(() => { if (Date.now() - this.lastHeartbeat > 15000) { this.close(); this.emit('offline', 'GPU heartbeat expired'); } }, 1000);
+    this.monitor = setInterval(() => { if (liveness.expired(Date.now())) { this.close(); this.emit('offline', 'GPU heartbeat expired'); } }, 1000);
   }
-  request(method, params) { return this.peer.request(method, params, ['activate','createTask'].includes(method) ? 45000 : method==='submitFirstText'?30000:15000); }
+  request(method, params) { return this.peer.request(method, params,
+    ['activate','createTask','watch','history'].includes(method) ? 45000 : 15000); }
   close() { if (this.closed) return; this.closed = true; clearInterval(this.monitor); this.peer.close(); this.child.stdin.end(); this.child.kill(); }
 }

@@ -12,7 +12,8 @@ import {FrameDecoder, encodeFrame} from './framing.mjs';
 import {PIPE_PATH} from './ipc.mjs';
 import {installedDesktop} from './installed.mjs';
 import {startGuardServer} from './guard-server.mjs';
-import {GPU_THREAD, UUID, desktopHubRoute, textFromFollower} from './guard-policy.mjs';
+import {GPU_THREAD, UUID, desktopHubRoute} from './guard-policy.mjs';
+import {followerTurnInput,loadLocalImages} from './image-input.mjs';
 import {TaskHub} from './task-hub.mjs';
 import {turnsOf} from './state.mjs';
 import {readLastTask, saveLastTask} from './launch-state.mjs';
@@ -130,14 +131,19 @@ async function respond(message) {
       send({...base, resultType: 'success', result: modelFollowerResult(message.version, result)});
       return;
     }
-    const text = textFromFollower(message, task.id), operationId = message.params.turnStart.request.clientUserMessageId;
+    const {text,localImages}=followerTurnInput(message,task.id), operationId = message.params.turnStart.request.clientUserMessageId;
+    const images=await loadLocalImages(localImages);
     const settings = settingsFromTurn(message.params.turnStart.request);
     const plan=planFollowupFromFollower(message,task.policy,text);
     let operation = report.submissions.find(s => s.operationId === operationId);
-    if (!operation) { operation = {threadId: task.id, operationId, attemptedAt: new Date().toISOString(), outcome: 'pending'}; report.submissions.push(operation); record(); }
+    if (!operation) { operation = {threadId: task.id, operationId, attemptedAt: new Date().toISOString(), outcome: 'pending',
+      imageCount:images.length,imageBytes:images.reduce((sum,image)=>sum+image.size,0),requestTimeoutMs:message.timeoutMs??null};
+      report.submissions.push(operation); record(); }
     try {
-      const result = await hub.submit(task.id, operationId, text, settings,plan);
+      const result = await hub.submit(task.id, operationId, text, settings,plan,images);
       operation.outcome = 'acknowledged'; operation.turnId = result?.result?.turn?.id ?? null; record();
+      // Preserve the official owner payload exactly. It is already
+      // {result: TurnStartResponse}; adding another wrapper breaks callers.
       send({...base, resultType: 'success', result});
     } catch (error) { if (operation.outcome !== 'acknowledged') operation.outcome = 'unconfirmed-or-rejected'; record(); throw error; }
   } catch (error) {

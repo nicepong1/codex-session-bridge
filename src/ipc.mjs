@@ -210,11 +210,14 @@ export class DesktopIpc extends EventEmitter {
       {version:1,targetClientId:session.ownerClientId,timeoutMs:10000}).then(response=>response.result);
   }
 
-  startTextTurn({session, appVersion, text, clientUserMessageId, settings = {}, allowEmptyInitial = false, plan = null}) {
+  startTextTurn({session, appVersion, text, clientUserMessageId, settings = {}, allowEmptyInitial = false, plan = null, images = []}) {
     if (!this.#allowRemoteInput || this.#probeUsed) throw new Error('Remote input is disabled or already attempted');
     const overrides = plan ? planTurnOverrides(session,plan,text,settings) : modelTurnOverrides(session.state, settings);
     if (!supportedHostVersion(appVersion) || session.threadId !== this.#allowedThreadId || !/^[a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12}$/i.test(session.threadId)) throw new Error('Untested GPU scope');
-    if (typeof text !== 'string' || !text.trim() || text.length > 16000 || !/^[a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12}$/i.test(clientUserMessageId ?? '')) throw new Error('Invalid text input');
+    if (typeof text !== 'string' || !text.trim() || text.length > 16000 || !/^[a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12}$/i.test(clientUserMessageId ?? '') ||
+        !Array.isArray(images) || images.length > 4 || images.some(image => image?.type !== 'image' || typeof image.url !== 'string' ||
+          !/^data:image\/(?:png|jpeg|gif|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(image.url) || ![null,'auto','low','high','original'].includes(image.detail ?? null)))
+      throw new Error('Invalid text or image input');
     const summary = session.summary();
     const turns = turnsOf(session.state);
     if (summary.stale || Date.now() - session.receivedAt > 5000 || summary.runtimeStatus !== 'idle' || summary.activeTurnIds.length ||
@@ -223,7 +226,8 @@ export class DesktopIpc extends EventEmitter {
     if (this.#following.get(session.threadId) !== session.ownerClientId) throw new Error('GPU owner is not being followed');
     this.#probeUsed = true;
     return this.#request('thread-follower-start-turn', {conversationId: session.threadId,
-      turnStart: {request: {threadId: session.threadId, clientUserMessageId, input: [{type: 'text', text, text_elements: []}], ...overrides},
+      turnStart: {request: {threadId: session.threadId, clientUserMessageId,
+        input: [{type: 'text', text, text_elements: []}, ...images], ...overrides},
         context: {inheritThreadSettings: true, attachments: [], commentAttachments: []}}},
       {version: 2, targetClientId: session.ownerClientId, timeoutMs: 15000}).then(response => response.result);
   }

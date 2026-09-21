@@ -62,6 +62,26 @@ test('prefetch is sequential, yields to foreground work and never fetches an inv
   const a = cache.get(id); a.state.title = 'changed'; assert.equal(cache.get(id).state.title, '저장된 대화'); cache.close();
 });
 
+test('default preview work is bounded to the newest catalog window and follows a changed top item', async () => {
+  const cache = cacheFor({fetch: async taskId => storedHistoryPreview(thread(taskId), taskId)});
+  assert.equal(cache.maxEntries, 32); assert.equal(cache.maxBytes, 32 * 1024 * 1024);
+  const rows = Array.from({length: 40}, (_, i) => thread(randomUUID(), 100 - i));
+  cache.replace(rows); assert.equal(cache.versions.size, 40); assert.equal(cache.queue.size, 32);
+  assert.deepEqual([...cache.queue.keys()], rows.slice(0, 32).map(row => row.id));
+  cache.queue.clear(); cache.enqueue(rows.slice(32)); assert.equal(cache.queue.size, 0);
+  const newest = thread(randomUUID(), 200); cache.replace([newest, ...rows]);
+  assert.equal([...cache.queue.keys()][0], newest.id); assert.equal(cache.queue.has(rows[31].id), false);
+  cache.close();
+});
+
+test('a selected task can load a safe preview while background reads are paused', async () => {
+  let calls = 0;
+  const cache = cacheFor({canFetch: () => false, fetch: async taskId => { calls++; return storedHistoryPreview(thread(taskId), taskId); }});
+  cache.enqueue([thread()]); await cache.pump(); assert.equal(calls, 0);
+  const preview = await cache.load(id); assert.equal(calls, 1); assert.equal(preview.threadId, id);
+  assert.equal(cache.get(id).state.resumeState, 'resuming'); cache.close();
+});
+
 test('catalog changes and connection loss cannot publish an outdated in-flight preview', async () => {
   let finish; const cache = cacheFor({fetch: taskId => new Promise(resolve => { finish = () => resolve(storedHistoryPreview(thread(taskId), taskId)); })});
   cache.enqueue([thread()]); const first = cache.pump(); cache.enqueue([thread(id, 20)]); finish(); await first;
@@ -79,6 +99,15 @@ test('age, count and byte limits bound previews, and failures do not retry in a 
   now = 100; assert.equal(cache.get(b), null); cache.close();
   const failed = cacheFor({now: () => now, fetch: async () => { calls++; throw new Error('not available'); }});
   failed.enqueue([thread()]); await failed.pump(); failed.enqueue([thread()]); await failed.pump(); assert.equal(calls, 3); failed.close();
+});
+
+test('oversized previews are not retried by every catalog scan until that task changes', async () => {
+  let now = 0, calls = 0;
+  const cache = cacheFor({now: () => now, fetch: async () => { calls++; throw new Error('GPU history preview exceeds size limit'); }});
+  cache.replace([thread()]); await cache.pump(); assert.equal(calls, 1);
+  now = 600000; cache.replace([thread()]); await cache.pump(); assert.equal(calls, 1);
+  assert.equal(await cache.load(id), null); assert.equal(calls, 1);
+  cache.replace([thread(id, 11)]); await cache.pump(); assert.equal(calls, 2); cache.close(); assert.equal(cache.failures.size, 0);
 });
 
 test('a loaded preview refreshes after expiration without user clicks; close stops late delivery', async () => {

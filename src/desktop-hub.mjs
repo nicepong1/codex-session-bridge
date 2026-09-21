@@ -16,7 +16,7 @@ import {GPU_THREAD, UUID, desktopHubRoute, textFromFollower} from './guard-polic
 import {TaskHub} from './task-hub.mjs';
 import {turnsOf} from './state.mjs';
 import {readLastTask, saveLastTask} from './launch-state.mjs';
-import {readProjectCatalog, projectDisplayState, orderProjectsByActivity} from './project-catalog.mjs';
+import {readProjectCatalog, projectDisplayState} from './project-catalog.mjs';
 import {settingsFromFollower, settingsFromTurn, modelFollowerResult} from './model-settings.mjs';
 import {COMMAND_APPROVAL_METHOD} from './command-approval.mjs';
 import {COMPUTER_APPROVAL_METHOD} from './computer-approval.mjs';
@@ -307,12 +307,17 @@ try {
   report.port = server.port;
   connectLocal();
   if (values.launch) {
-    const catalogProjects = await readProjectCatalog((method, params) => hub.read(method, params));
-    await hub.ensureDesktopOrder();
-    if(!initialThread||!hub.desktopOrder.rows.has(initialThread))initialThread=hub.desktopOrder.rows.keys().next().value??null;
+    // The native client can request its first recent page after it is visible.
+    // Do not hold the entire window behind a multi-page task scan. Project/list
+    // is small and is still needed before launch to seed the isolated profile.
+    const [catalogProjects, selectedTask] = await Promise.all([
+      readProjectCatalog((method, params) => hub.read(method, params)),
+      initialThread ? hub.read('thread/read', {threadId: initialThread, includeTurns: false}) : Promise.resolve(null)
+    ]);
+    if (initialThread && selectedTask?.thread?.id !== initialThread) initialThread = null;
     report.threadId=initialThread;
-    if(initialThread){hub.knownIds.add(initialThread);hub.task(initialThread).desired=true;hub.prepare(initialThread,{touch:false}).catch(()=>{});}
-    const projects = orderProjectsByActivity(catalogProjects, [...hub.desktopOrder.rows].map(([id,t]) => ({id,...t})));
+    if(initialThread){hub.task(initialThread).desired=true;hub.prepare(initialThread,{touch:false}).catch(()=>{});}
+    const projects = catalogProjects;
     const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-gpu-guard-'));
     const userData = path.join(profile, 'user-data'), codexHome = path.join(profile, 'codex-home');
     fs.mkdirSync(userData); fs.mkdirSync(codexHome);
@@ -323,7 +328,7 @@ try {
     fs.writeFileSync(path.join(codexHome, '.codex-global-state.json'), JSON.stringify(displayState), {flag: 'wx'});
     report.projects = {initializedAt: new Date().toISOString(), count: projects.length,
       entries: projects.map(p => ({id: p.id, name: p.name})), source: 'GPU project/list',
-      ordering: 'latest GPU file-list task in each project', refresh: 'on-launch'};
+      ordering: 'GPU project position', refresh: 'on-launch'};
     const transport = fileURLToPath(new URL('../bin/codex-gpu-guard.exe',import.meta.url)); if (!fs.existsSync(transport)) throw new Error('Run Build-Guard.ps1 first');
     const exe=desktop.executable;
     const env = {...process.env, CODEX_HOME: codexHome, CODEX_ELECTRON_USER_DATA_PATH: userData,

@@ -61,11 +61,18 @@ export function hubReadRoute(method, params = {}) {
         (params.cwd != null && !(validCwd(params.cwd) || (Array.isArray(params.cwd) && params.cwd.length <= 100 && params.cwd.every(validCwd))))) throw new Error('gpu-guard-denied: invalid list query');
     // The desktop queries each sidebar section separately. Dropping this filter
     // makes every GPU task appear pinned, even though its ID and title are correct.
+    // The native desktop sends projectId:null for the unscoped Recent list.
+    // Forwarding that null makes the GPU server return only conversations that
+    // are outside projects, so active project work disappears from Recent. A
+    // cwd-filtered project query still needs the explicit null to include older
+    // rows that predate project IDs.
+    const includeProjectId = Object.hasOwn(params, 'projectId') &&
+      (params.projectId != null || Object.hasOwn(params, 'cwd'));
     return {method, params: {limit, cursor: params.cursor ?? null, archived: params.archived ?? false,
       sortKey: params.sortKey ?? 'updated_at', useStateDbOnly: params.sectionId != null || (Array.isArray(params.cwd) && params.useStateDbOnly === true), sourceKinds: [],
       ...(params.sectionId != null ? {sectionId: params.sectionId} : {}),
       ...(params.sortDirection != null ? {sortDirection: params.sortDirection} : {}),
-      ...(Object.hasOwn(params, 'projectId') ? {projectId: params.projectId} : {}),
+      ...(includeProjectId ? {projectId: params.projectId} : {}),
       ...(params.cwd != null ? {cwd: Array.isArray(params.cwd) ? [...params.cwd] : params.cwd} : {})}};
   }
   if (method === 'thread/loaded/list') return {method, params: {}};

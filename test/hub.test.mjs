@@ -31,10 +31,10 @@ class FakeConnection extends EventEmitter {
 function setup(t) { const connection = new FakeConnection(), hub = new TaskHub({createConnection: () => connection}); t.after(() => hub.close()); return {hub, connection}; }
 function following(id, value = true) { return {method: 'thread-stream-following-changed', version: 1, sourceClientId: 'notebook', params: {hostId: 'local', conversationId: id, following: value}}; }
 
-test('desktop ordering loads one paged read-only catalog and prevents older hydration from changing the order', async t => {
+test('first recent page returns without a full catalog scan; background ordering later projects stable metadata', async t => {
   const connection = new FakeConnection(), history = new FakeConnection();
   const hub = new TaskHub({createConnection: () => connection, createHistoryConnection: () => history,
-    prefetchHistory: true, refreshCatalog: true, canRefreshCatalog: () => false});
+    prefetchHistory: true, refreshCatalog: true});
   t.after(() => hub.close());
   connection.request = async (method, params) => {
     connection.calls.push({method, params});
@@ -44,11 +44,22 @@ test('desktop ordering loads one paged read-only catalog and prevents older hydr
     if (method === 'read' && params.method === 'thread/read') return {thread:{id:GPU_THREAD,updatedAt:2,turns:[]}};
     throw new Error('Unexpected operation');
   };
-  const [a,b] = await Promise.all([hub.read('thread/list',{}),hub.read('thread/list',{})]);
-  assert.equal(connection.calls.filter(c=>c.method==='catalog').length,2);
-  assert.equal(a.data[0].recencyAt,b.data[0].recencyAt);
+  history.request = async (method, params) => {
+    history.calls.push({method, params});
+    if (method !== 'catalog') throw new Error('Unexpected history operation');
+    return params.cursor ? {tasks:[{id:second,title:'두 번째',updatedAt:90}],nextCursor:null}
+      : {tasks:[{id:GPU_THREAD,title:'첫 번째',updatedAt:100}],nextCursor:'second'};
+  };
+  const a = await hub.read('thread/list',{});
+  assert.equal(connection.calls.filter(c=>c.method==='catalog').length,0);
+  assert.equal(history.calls.length,0); assert.equal(a.data[0].recencyAt,2);
+  hub.backgroundAfter=0; await hub.catalogPoller.scan();
+  const b = await hub.read('thread/list',{});
+  assert.equal(history.calls.filter(c=>c.method==='catalog').length,2);
+  assert.notEqual(b.data[0].recencyAt,a.data[0].recencyAt);
+  assert.equal(b.data[0].recencyAt,100.25);
   const single = await hub.read('thread/read',{threadId:GPU_THREAD,includeTurns:false});
-  assert.equal(single.thread.recencyAt,a.data[0].recencyAt);
+  assert.equal(single.thread.recencyAt,b.data[0].recencyAt);
   assert.equal(single.thread.updatedAt,100);
   assert.equal(hub.tasks.size,0);
 });
@@ -57,23 +68,42 @@ test('a disconnected ordering scan cannot publish its delayed catalog', async t 
   const {hub,connection}=setup(t);let finish;
   connection.request=()=>new Promise(resolve=>{finish=resolve});
   const pending=hub.ensureDesktopOrder();
+  await new Promise(resolve => setImmediate(resolve));
   connection.online=false;connection.emit('state',{status:'offline'});
   finish({tasks:[{id:GPU_THREAD,updatedAt:1}],nextCursor:null});
   await assert.rejects(pending,/connection changed/);
   assert.equal(hub.desktopOrder.ready,false);
 });
 
+test('startup ordering waits for the verified GPU connection before requesting pages', async t => {
+  const connection = new FakeConnection(); connection.online = false;
+  let ready; connection.waitUntilReady = () => new Promise(resolve => { ready = resolve; });
+  const hub = new TaskHub({createConnection: () => connection}); t.after(() => hub.close());
+  const pending = hub.ensureDesktopOrder(); await new Promise(resolve => setImmediate(resolve));
+  assert.equal(connection.calls.length, 0);
+  connection.online = true; ready(); await pending;
+  assert.deepEqual(connection.calls.map(call => call.method), ['catalog']);
+  assert.equal(hub.desktopOrder.ready, true);
+});
+
 test('automatic catalog reads discover new IDs without opening tasks and invalidate cached pages', async t => {
   const connection = new FakeConnection(), history = new FakeConnection(); let rows = [{id: GPU_THREAD, title: '첫 작업', updatedAt: 1}];
+  let liveRows = [{id: GPU_THREAD, name: '첫 작업', updatedAt: 1}];
+  const originalRequest = connection.request.bind(connection);
+  connection.request = async (method, params) => method === 'read' && params.method === 'thread/list'
+    ? (connection.calls.push({method, params}), {data: liveRows, nextCursor: null}) : originalRequest(method, params);
   history.request = async (method, params) => { history.calls.push({method, params}); assert.equal(method, 'catalog'); return {tasks: rows, nextCursor: null}; };
   const hub = new TaskHub({createConnection: () => connection, prefetchHistory: true, createHistoryConnection: () => history, refreshCatalog: true});
   t.after(() => hub.close());
+  hub.backgroundAfter = 0;
   await hub.read('thread/list', {}); assert.equal(hub.taskListCache.entries.size, 1);
-  await hub.catalogPoller.scan(); rows = [...rows, {id: second, title: '새 작업', updatedAt: 2}];
+  await hub.catalogPoller.scan(); rows = [{id: second, title: '새 작업', updatedAt: 2}, ...rows];
+  liveRows = [{id: second, name: '새 작업', updatedAt: 2}, ...liveRows];
   const events = []; hub.on('catalogChanged', value => events.push(value));
   await hub.catalogPoller.scan();
   assert.equal(events.length, 1); assert.equal(events[0][0].id, second);
   assert.equal(hub.knownIds.has(second), true); assert.equal(hub.taskListCache.entries.size, 0);
+  assert.equal((await hub.read('thread/list', {})).data[0].id, second);
   assert.equal(hub.tasks.size, 0); assert.equal(connection.calls.filter(c => ['watch', 'activate', 'submitText'].includes(c.method)).length, 0);
 });
 
@@ -395,7 +425,7 @@ test('prefetched body is published before slow activation while input stays bloc
       items: [{type: 'agentMessage', text: '저장된 답변'}]}]}, params.threadId);
   };
   const hub = new TaskHub({createConnection: () => connection, allowActivation: true, prefetchHistory: true, createHistoryConnection: () => historyConnection});
-  t.after(() => hub.close()); await hub.read('thread/list', {}); await hub.history.pump(); await hub.history.pump();
+  t.after(() => hub.close()); hub.backgroundAfter = 0; await hub.read('thread/list', {}); await hub.history.pump(); await hub.history.pump();
   assert.equal(hub.tasks.size, 0); assert.equal(connection.calls.some(c => c.method === 'activate'), false);
   let finish; const original = connection.request.bind(connection);
   connection.request = (method, params) => method === 'activate' ? new Promise(resolve => { finish = () => resolve(snapshot(params.threadId)); }) : original(method, params);
@@ -408,4 +438,26 @@ test('prefetched body is published before slow activation while input stays bloc
   assert.deepEqual(sent.at(-1), {preview: false, online: true, id: second});
   assert.equal(hub.tasks.get(second).policy.owner, 'owner-' + second);
   assert.equal(connection.calls.some(c => c.method === 'submitText'), false);
+});
+
+test('selecting an uncached task requests its stored body immediately while background work stays paused', async t => {
+  const connection = new FakeConnection(), historyConnection = new FakeConnection();
+  let historyReads = 0;
+  historyConnection.request = async (method, params) => {
+    historyReads++; assert.equal(method, 'history');
+    return storedHistoryPreview({id: params.threadId, sessionId: params.threadId, turns: [{id: 'stored', status: 'completed',
+      items: [{type: 'agentMessage', text: '빠른 저장 본문'}]}]}, params.threadId);
+  };
+  const hub = new TaskHub({createConnection: () => connection, allowActivation: true, prefetchHistory: true,
+    createHistoryConnection: () => historyConnection});
+  t.after(() => hub.close()); await hub.read('thread/list', {});
+  let finish; connection.request = (method, params) => method === 'activate' ? new Promise(resolve => {
+    connection.calls.push({method, params}); finish = () => resolve(snapshot(params.threadId));
+  }) : FakeConnection.prototype.request.call(connection, method, params);
+  const sent = []; hub.on('snapshot', task => sent.push({preview: task.policy.preview, online: task.policy.online, id: task.id}));
+  hub.follow(following(second)); await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(sent, [{preview: true, online: false, id: second}]);
+  assert.equal(historyReads, 1);
+  finish(); await hub.tasks.get(second).pending;
+  assert.deepEqual(sent.at(-1), {preview: false, online: true, id: second});
 });

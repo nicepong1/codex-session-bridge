@@ -24,16 +24,19 @@ import {popupReplyFromFollower} from './popup-replies.mjs';
 export class TaskHub extends EventEmitter {
   constructor({seconds = 28800, createConnection, allowActivation = false, warmRetentionMs = 600000, maxWarmTasks = 6,
     prefetchHistory = false, createHistoryConnection, refreshCatalog = false, canRefreshCatalog = () => true,
-    catalogFilter = rows => rows, maxParkedHistories = 6, allowProjectCreation = false, allowModelSettings = false, mapGpuPaths = false, pathMapper, allowNewTasks = false, allowCommandApprovals = false, allowComputerApprovals = false, allowPermissionsApprovals = false, allowPopupReplies = false, allowArchiving = false} = {}) {
+    catalogFilter = rows => rows, maxParkedHistories = 6, backgroundQuietMs = 5000,
+    allowProjectCreation = false, allowModelSettings = false, mapGpuPaths = false, pathMapper, allowNewTasks = false, allowCommandApprovals = false, allowComputerApprovals = false, allowPermissionsApprovals = false, allowPopupReplies = false, allowArchiving = false} = {}) {
     if (!Number.isInteger(warmRetentionMs) || warmRetentionMs < 1000 || warmRetentionMs > 600000 ||
         !Number.isInteger(maxWarmTasks) || maxWarmTasks < 0 || maxWarmTasks > 6 ||
-        !Number.isInteger(maxParkedHistories) || maxParkedHistories < 0 || maxParkedHistories > 6) throw new Error('Invalid recent task retention limits');
+        !Number.isInteger(maxParkedHistories) || maxParkedHistories < 0 || maxParkedHistories > 6 ||
+        !Number.isInteger(backgroundQuietMs) || backgroundQuietMs < 1200 || backgroundQuietMs > 30000) throw new Error('Invalid recent task retention limits');
     super(); this.tasks = new Map(); this.knownIds = new Set(); this.titles = new Map(); this.submissions = new SubmissionRegistry(); this.closed = false;
     if (refreshCatalog && !prefetchHistory) throw new Error('Catalog refresh requires the read-only history connection');
     this.catalogFilter = catalogFilter;
     this.desktopOrder = new DesktopRecentOrder(); this.orderPending = null; this.orderGeneration = 0;
     this.warmRetentionMs = warmRetentionMs; this.maxWarmTasks = maxWarmTasks;
     this.maxParkedHistories = maxParkedHistories;
+    this.backgroundQuietMs = backgroundQuietMs; this.backgroundAfter = Date.now() + backgroundQuietMs;
     this.allowActivation = allowActivation;
     this.allowArchiving = allowArchiving; this.archiveRequests = new Map(); this.archivedIds = new Set();
     this.allowProjectCreation = allowProjectCreation;
@@ -80,7 +83,7 @@ export class TaskHub extends EventEmitter {
       this.history = new HistoryPrefetch({fetch: async id => {
         await this.historyConnection.waitUntilReady();
         return this.historyConnection.request('history', {threadId: id});
-      }, canFetch: () => this.connection.online && this.historyConnection.online && Date.now() - this.lastSelectedAt > 1200 &&
+      }, canFetch: () => this.connection.online && this.historyConnection.online && Date.now() >= this.backgroundAfter &&
         ![...this.tasks.values()].some(task => task.pending)});
       this.history.on('ready', event => {
         const task = this.tasks.get(event.threadId);
@@ -96,10 +99,11 @@ export class TaskHub extends EventEmitter {
         const page = await this.historyConnection.request('catalog', params);
         return {...page, tasks: this.catalogFilter(page.tasks)};
       }, canRun: () => !this.closed && this.connection.online && this.historyConnection.online && canRefreshCatalog() &&
-        Date.now() - this.lastSelectedAt > 1200 && ![...this.tasks.values()].some(task => task.pending)});
+        Date.now() >= this.backgroundAfter && ![...this.tasks.values()].some(task => task.pending)});
       this.catalogPoller.on('rows', rows => {
         this.desktopOrder.replace(rows);
         this.acceptCatalog({data: rows.map(row => ({...row, name: row.title})), nextCursor: null}, {archived: false});
+        this.history?.replace(rows);
       });
       this.catalogPoller.on('changes', rows => {
         this.taskListCache.clear(); this.emit('catalogChanged', rows);
@@ -178,8 +182,14 @@ export class TaskHub extends EventEmitter {
       this.emit('following', {threadId: id, state: 'selected', retained: task.policy.online});
     }
     this.lastSelectedAt = Date.now();
+    this.backgroundAfter = this.lastSelectedAt + this.backgroundQuietMs;
     task.lastUsed = Date.now(); task.desired = true;
-    this.showStoredPreview(task);
+    const previewShown = this.showStoredPreview(task);
+    if (!previewShown && this.history) {
+      this.history.prioritize(id);
+      // The ready event publishes this task only if it is still selected.
+      this.history.load(id).catch(() => {});
+    }
     this.refreshView(task);
     this.prepare(task.id, {activate: this.allowActivation}).catch(() => {});
     return true;
@@ -333,7 +343,6 @@ export class TaskHub extends EventEmitter {
     await this.connection.waitUntilReady();
     if (this.closed || !this.connection.online) throw new Error('GPU read connection unavailable');
     if(this.pathMapper) params=await this.pathMapper.params(method,params);
-    if (method === 'thread/list' && params?.sectionId == null && this.catalogPoller) await this.ensureDesktopOrder();
     const result = method === 'thread/list'
       ? await this.taskListCache.read(params, async normalized => {
         const page = await this.connection.request('read', {method, params: normalized});
@@ -347,13 +356,18 @@ export class TaskHub extends EventEmitter {
       // read or owner discovery should attach to a live GPU task.
       if (params.includeTurns === true) this.prepare(params.threadId).catch(() => {});
     }
+    // The first recent page is already sorted by the GPU's official API. Return
+    // it immediately; the low-priority catalog transport fills the equal-second
+    // tie-break index later without blocking the visible window.
     return this.desktopOrder.response(method, result);
   }
   ensureDesktopOrder() {
     if (this.desktopOrder.ready) return Promise.resolve();
     if (this.orderPending) return this.orderPending;
-    const generation = this.orderGeneration;
     const pending = (async () => {
+      await this.connection.waitUntilReady();
+      if (this.closed || !this.connection.online) throw new Error('Remote ordering connection unavailable');
+      const generation = this.orderGeneration;
       const rows = [], seen = new Set(); let cursor = null;
       do {
         const page = await this.connection.request('catalog', {cursor, limit: 100});

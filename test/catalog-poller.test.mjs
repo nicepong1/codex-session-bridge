@@ -6,6 +6,11 @@ const other = '714adca2-1120-4134-83ad-82c84799ea63';
 const row = (id, title = '작업', updatedAt = 1) => ({id, title, updatedAt, sessionId: id});
 const page = tasks => ({tasks, nextCursor: null});
 
+test('background catalog refresh defaults to a low duty cycle', t => {
+  const poller = new CatalogPoller({autoStart: false, fetchPage: async () => page([])}); t.after(() => poller.close());
+  assert.equal(poller.intervalMs, 30000);
+});
+
 test('metadata scan detects newly visible tasks and edits across pages without repeating unchanged events', async t => {
   let rows = [row(GPU_THREAD)], calls = 0;
   const poller = new CatalogPoller({autoStart: false, fetchPage: async ({cursor}) => {

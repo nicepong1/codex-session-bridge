@@ -19,6 +19,13 @@ test('recent ordering and explicit sort directions survive the read facade',()=>
   assert.equal(Object.hasOwn(requested.params,'sectionId'),false);
   assert.equal(requested.params.useStateDbOnly,false);
 });
+test('unscoped Recent drops the desktop projectId null filter while project folder queries preserve it',()=>{
+  const recent=desktopHubRoute('thread/list',{limit:50,projectId:null});
+  assert.equal(Object.hasOwn(recent.params,'projectId'),false);
+  const project=desktopHubRoute('thread/list',{limit:100,projectId:null,cwd:['C:\\Projects\\document-demo'],useStateDbOnly:true});
+  assert.equal(project.params.projectId,null);
+  assert.deepEqual(project.params.cwd,['C:\\Projects\\document-demo']);
+});
 test('malformed section and ordering filters are refused instead of returning unrelated tasks',()=>{
   for(const params of [{sectionId:'../all'},{sectionId:{}},{sortKey:'unknown'},{sortDirection:'sideways'}]){
     assert.throws(()=>hubReadRoute('thread/list',params));

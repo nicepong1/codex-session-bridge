@@ -3,7 +3,7 @@ import {UUID} from './guard-policy.mjs';
 
 // Poll metadata on the read-only history transport; never open or execute tasks.
 export class CatalogPoller extends EventEmitter {
-  constructor({fetchPage, canRun = () => true, intervalMs = 10000, maxPages = 50, now = Date.now, autoStart = true}) {
+  constructor({fetchPage, canRun = () => true, intervalMs = 30000, maxPages = 50, now = Date.now, autoStart = true}) {
     super();
     if (!Number.isInteger(intervalMs) || intervalMs < 1000 || !Number.isInteger(maxPages) || maxPages < 1 || maxPages > 50) throw new Error('Invalid catalog polling limits');
     Object.assign(this, {fetchPage, canRun, intervalMs, maxPages, now});

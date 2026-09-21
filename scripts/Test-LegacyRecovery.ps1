@@ -6,7 +6,7 @@ New-Item -ItemType Directory -Path $bridgeReviewRoot|Out-Null
 try{
  $env:LOCALAPPDATA=$bridgeReviewRoot
  $bridgeHash=(Get-FileHash -LiteralPath (Join-Path $Stage 'release-files.json')).Hash.Substring(0,12).ToLowerInvariant()
- $bridgeTarget=Join-Path $bridgeReviewRoot ('Programs\CodexSessionBridge\versions\0.19.4-'+$bridgeHash)
+ $bridgeTarget=Join-Path $bridgeReviewRoot ('Programs\CodexSessionBridge\versions\0.19.5-'+$bridgeHash)
  $bridgeRuntime=Join-Path $bridgeTarget 'runtime';New-Item -ItemType Directory -Path $bridgeRuntime -Force|Out-Null
  $bridgeNode=Join-Path $bridgeRuntime 'node.exe'
  Copy-Item -LiteralPath (Join-Path $Stage 'runtime\node.exe') -Destination $bridgeNode

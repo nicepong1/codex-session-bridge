@@ -1,5 +1,6 @@
 import {TESTED_APP_VERSION,supportedHostVersion} from './installed.mjs';
 import {popupNoticeState} from './popup-catalog.mjs';
+import {connectionNoticeState, connectionFailureKind} from './connection-notice.mjs';
 
 // A read-only view of one explicitly selected GPU conversation. No local task is created.
 export class NativeViewPolicy {
@@ -14,6 +15,7 @@ export class NativeViewPolicy {
     this.revision = 0;
     this.online = false;
     this.preview = false;
+    this.connectionFailure = null;
     this.followers = new Set();
   }
 
@@ -37,6 +39,7 @@ export class NativeViewPolicy {
     this.state.rolloutPath = '';
     this.state.resumeState = 'resumed';
     this.online = true;
+    this.connectionFailure = null;
     this.preview = false;
     this.revision += 1;
   }
@@ -53,8 +56,9 @@ export class NativeViewPolicy {
     return true;
   }
 
-  disconnect() {
+  disconnect(reason = 'unknown') {
     this.online = false;
+    this.connectionFailure = connectionFailureKind(reason);
     if (this.state) {
       this.state = {...this.state, threadRuntimeStatus: {type: 'systemError'}};
       this.revision += 1;
@@ -100,6 +104,7 @@ export class NativeViewPolicy {
     return {type: 'broadcast', method: 'thread-stream-state-changed', version: 11,
       sourceClientId: clientId, targetClientIds: recipients,
       params: {hostId: 'local', conversationId: this.viewThreadId,
-        change: {type: 'snapshot', revision: this.revision, conversationState: popupNoticeState(this.state)}}};
+        change: {type: 'snapshot', revision: this.revision,
+          conversationState: connectionNoticeState(popupNoticeState(this.state), this.connectionFailure)}}};
   }
 }

@@ -425,7 +425,7 @@ export class TaskHub extends EventEmitter {
   markOffline(task, reason) {
     if (!task || this.closed) return;
     task.observationGeneration++;
-    task.policy.disconnect(); task.error = reason;
+    task.policy.disconnect(reason); task.error = reason;
     this.emit('snapshot', task); this.emit('taskError', {threadId: task.id, reason});
   }
   async discover(request) {

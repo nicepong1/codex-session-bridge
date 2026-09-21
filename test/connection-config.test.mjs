@@ -6,7 +6,7 @@ import path from 'node:path';
 import {randomUUID,createHash} from 'node:crypto';
 import {validateProfile,saveProfile,loadProfile,selectProfile,profilePaths,verifyHostKeys} from '../src/connection-config.mjs';
 import {sshArguments,remoteNodeCommand} from '../src/ssh-command.mjs';
-import {desktopFromPaths,discoverCli} from '../src/installed.mjs';
+import {desktopFromPaths,discoverCli,hostModelSettingsVersion} from '../src/installed.mjs';
 const profile=()=>({version:1,id:randomUUID(),label:'Work PC',hostname:'192.0.2.10',username:'example-user',port:22,identityFile:'',remoteInstallPath:''});
 function fixture(t){const root=fs.mkdtempSync(path.join(os.tmpdir(),'csb-test-'));t.after(()=>fs.rmSync(root,{recursive:true,force:true}));return root}
 test('profiles and last-task/report paths are isolated per destination and user root',t=>{
@@ -45,6 +45,10 @@ const app=v=>`C:\\Program Files\\WindowsApps\\OpenAI.Codex_${v}_x64__package\\ap
 test('compatibility blocks unknown, ambiguous and wrong-role builds',()=>{
  assert.equal(desktopFromPaths(app('26.901.6511.0'),'client').testedBuild,true);
  assert.equal(desktopFromPaths(app('26.901.6511.0'),'host').testedBuild,true);
+ assert.equal(desktopFromPaths(app('26.908.9136.0'),'client').testedBuild,true);
+ assert.equal(desktopFromPaths(app('26.908.4834.0'),'host').testedBuild,true);
+ assert.equal(desktopFromPaths(app('26.915.4065.0'),'host').testedBuild,true);
+ assert.equal(desktopFromPaths(app('26.908.9136.0'),'host').testedBuild,false);
  assert.equal(desktopFromPaths(app('99.1.1.0'),'client').testedBuild,false);
  assert.equal(desktopFromPaths([app('26.901.6511.0'),app('26.901.5280.0')]).testedBuild,false);
  assert.equal(desktopFromPaths([]).testedBuild,false);
@@ -53,4 +57,9 @@ test('CLI cache discovery uses the supported executable regardless of cache dire
  const root=fixture(t);for(const name of ['new-cache','different-cache']){fs.mkdirSync(path.join(root,name));fs.writeFileSync(path.join(root,name,'codex.exe'),'fixture')}
  const found=discoverCli({root,execute:file=>file.includes('different-cache')?'codex-cli 0.153.4':'codex-cli 99.0.0'});
  assert.match(found.executable,/different-cache/);assert.throws(()=>discoverCli({root,execute:()=> 'codex-cli 99.0.0'}));
+ assert.equal(discoverCli({root,execute:()=> 'codex-cli 0.154.0-alpha.6.2'}).version,'codex-cli 0.154.0-alpha.6.2');
+ assert.equal(discoverCli({root,execute:()=> 'codex-cli 0.155.0-alpha.9.2'}).version,'codex-cli 0.155.0-alpha.9.2');
+ assert.equal(hostModelSettingsVersion('26.903.8094.0'),1);
+ assert.equal(hostModelSettingsVersion('26.915.4065.0'),2);
+ assert.throws(()=>hostModelSettingsVersion('99.1.1.0'));
 });

@@ -36,3 +36,7 @@ export function discoverCli({root=path.join(process.env.LOCALAPPDATA||'','OpenAI
 }
 
 export const supportedHostVersion=version=>compatibility.hostAppVersions.includes(version);
+export function hostModelSettingsVersion(version){
+  if(!supportedHostVersion(version))throw Error('Unsupported host Codex build');
+  return compatibility.hostModelSettingsV2Versions.includes(version)?2:1;
+}

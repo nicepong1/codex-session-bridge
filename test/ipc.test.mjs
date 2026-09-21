@@ -68,6 +68,28 @@ test('invalid model acknowledgement cannot claim an applied update',async t=>{
     appVersion:'26.903.8094.0',settings:{model:'example'}}),/not acknowledged/);
 });
 
+for (const [appVersion,applied] of [['26.908.4834.0',true],['26.908.4834.0',false],['26.915.4065.0',true]]) test(`host ${appVersion} model v2 retains atomic condition and applied=${applied}`, async t=>{
+  const id=randomUUID(), owner=randomUUID(), received=[];
+  const client=await fixture(t,(message,respond)=>{if(message.type==='request'){received.push(message);respond({applied},owner);}},
+    {allowRemoteInput:true,allowedThreadId:id});
+  client.follow(id,owner);
+  const condition={ifEffortEquals:'medium',ifModelEquals:'example'},settings={model:'example',effort:'high'};
+  const args={session:{threadId:id,ownerClientId:owner,stale:false,receivedAt:Date.now()},
+    appVersion,settings,condition};
+  assert.deepEqual(await client.updateModelSettings(args),{applied});
+  assert.equal(received.length,1);assert.equal(received[0].version,2);assert.equal(received[0].targetClientId,owner);
+  assert.deepEqual(received[0].params,{conversationId:id,threadSettings:settings,activeTurnId:null,condition});
+  assert.throws(()=>client.updateModelSettings(args));
+});
+
+test('new host cannot acknowledge a v2 model write using an old v1 result',async t=>{
+  const id=randomUUID(),owner=randomUUID();
+  const client=await fixture(t,(message,respond)=>{if(message.type==='request')respond({ok:true},owner);},
+    {allowRemoteInput:true,allowedThreadId:id});client.follow(id,owner);
+  await assert.rejects(client.updateModelSettings({session:{threadId:id,ownerClientId:owner,stale:false,receivedAt:Date.now()},
+    appVersion:'26.908.4834.0',settings:{effort:'high'}}),/not acknowledged/);
+});
+
 test('command approval sends the exact once-only decision to the verified GPU owner', async t => {
   const id=randomUUID(),owner=randomUUID(),turn=randomUUID(), received=[];
   const client=await fixture(t,(message,respond)=>{if(message.type==='request'){received.push(message);respond({ok:true},owner);}},

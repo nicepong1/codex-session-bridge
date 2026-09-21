@@ -2,7 +2,7 @@ import net from 'node:net';
 import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { FrameDecoder, encodeFrame } from './framing.mjs';
-import {TESTED_APP_VERSION,supportedHostVersion} from './installed.mjs';
+import {TESTED_APP_VERSION,hostModelSettingsVersion,supportedHostVersion} from './installed.mjs';
 import { turnsOf } from './state.mjs';
 import {modelSettings, modelTurnOverrides, modelCondition} from './model-settings.mjs';
 import {planTurnOverrides} from './plan-followup.mjs';
@@ -151,13 +151,18 @@ export class DesktopIpc extends EventEmitter {
     if (!this.#allowRemoteInput || this.#probeUsed || !supportedHostVersion(appVersion) || session.threadId !== this.#allowedThreadId ||
         session.stale || Date.now() - session.receivedAt > 5000 || this.#following.get(session.threadId) !== session.ownerClientId)
       throw new Error('A fresh, followed GPU owner is required for model settings');
-    // All validated host builds use v1: no atomic conditional update exists.
-    // A read-then-write check could overwrite a newer phone/desktop selection.
-    // Report not applied to v2 clients without sending any mutation to the host.
-    if (expected !== null) return Promise.resolve({applied: false});
+    // Select the protocol by the verified host build, never the notebook build.
+    // Older hosts cannot atomically check conditions; do not lower those writes.
+    const version = hostModelSettingsVersion(appVersion);
+    if (version === 1 && expected !== null) return Promise.resolve({applied: false});
     this.#probeUsed = true;
-    return this.#request('thread-follower-update-thread-settings', {conversationId: session.threadId, threadSettings: selection},
-      {version: 1, targetClientId: session.ownerClientId, timeoutMs: 15000}).then(response => {
+    return this.#request('thread-follower-update-thread-settings', {conversationId: session.threadId, threadSettings: selection,
+      ...(version === 2 ? {activeTurnId: null, condition: expected} : {})},
+      {version, targetClientId: session.ownerClientId, timeoutMs: 15000}).then(response => {
+        if (version === 2) {
+          if (typeof response.result?.applied !== 'boolean') throw Error('GPU model settings were not acknowledged');
+          return {applied: response.result.applied};
+        }
         if (response.result?.ok !== true) throw Error('GPU model settings were not acknowledged');
         return {applied: true};
       });

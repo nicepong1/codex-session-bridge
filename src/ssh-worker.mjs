@@ -6,6 +6,7 @@ import {UUID} from './guard-policy.mjs';
 import {loadProfile} from './connection-config.mjs';
 import {resolvedProfile} from './remote-installation.mjs';
 import {sshArguments,remoteNodeCommand} from './ssh-command.mjs';
+import {ConnectionFailureClassifier} from './connection-notice.mjs';
 
 export class SshWorker extends EventEmitter {
   constructor({threadId, seconds = 600, mode = 'session', profile = resolvedProfile(loadProfile())}) {
@@ -26,14 +27,9 @@ export class SshWorker extends EventEmitter {
     }); } catch { this.close(); this.emit('offline', 'Invalid GPU stream'); } });
     this.peer.on('message', message => this.emit('message', message));
     this.failureKind = 'unknown';
+    const failure = new ConnectionFailureClassifier();
     this.child.stderr.on('data', data => {
-      const diagnostic = data.toString('utf8');
-      // Classify only. Never persist raw stderr, usernames, keys, or command text.
-      if (/timed out|timeout/i.test(diagnostic)) this.failureKind = 'timeout';
-      else if (/reset|broken pipe|closed by remote|connection.*closed/i.test(diagnostic)) this.failureKind = 'connection-closed';
-      else if (/permission denied|authentication failed/i.test(diagnostic)) this.failureKind = 'authentication-or-access';
-      else if (/host key verification|REMOTE HOST IDENTIFICATION/i.test(diagnostic)) this.failureKind = 'host-key';
-      else if (/refused|unreachable|no route/i.test(diagnostic)) this.failureKind = 'unreachable';
+      this.failureKind = failure.accept(data.toString('utf8'));
     });
     this.child.stdin.on('error', () => {});
     this.child.on('error', () => { this.peer.close(); this.emit('offline', 'SSH failed'); });

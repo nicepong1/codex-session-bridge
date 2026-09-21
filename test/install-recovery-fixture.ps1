@@ -17,7 +17,7 @@ foreach($bridgeName in @('runtime/node.exe','bin/codex-gpu-guard.exe','package.j
  $bridgeEntries+=@{path=$bridgeName;sha256=(Get-FileHash -LiteralPath $bridgeFile).Hash.ToLowerInvariant()}
 }
 $bridgeManifest=Join-Path $bridgeSource 'release-files.json'
-[IO.File]::WriteAllText($bridgeManifest,(@{version='0.19.7';files=$bridgeEntries}|ConvertTo-Json -Depth 4))
+[IO.File]::WriteAllText($bridgeManifest,(@{version='0.19.8';files=$bridgeEntries}|ConvertTo-Json -Depth 4))
 $bridgeHash=(Get-FileHash -LiteralPath $bridgeManifest).Hash.Substring(0,12).ToLowerInvariant()
 function Assert-Review([bool]$Condition,[string]$Message){if(!$Condition){throw $Message}}
 function Run-Installer {& (Join-Path $bridgeSource 'Install.ps1') -Role Client -NoConfigure -NoShortcut|Out-Null}
@@ -35,7 +35,7 @@ try {
  $bridgeFailed=$false;try{Run-Installer}catch{$bridgeFailed=$_.Exception.Message -match 'Injected disk copy failure'}
  Remove-Item -LiteralPath Function:\Copy-Item
  Assert-Review $bridgeFailed 'Failure injection was not reached'
- $bridgeTarget=Join-Path $env:LOCALAPPDATA ('Programs\CodexSessionBridge\versions\0.19.7-'+$bridgeHash)
+ $bridgeTarget=Join-Path $env:LOCALAPPDATA ('Programs\CodexSessionBridge\versions\0.19.8-'+$bridgeHash)
  Assert-Review (!(Test-Path -LiteralPath $bridgeTarget)) 'Partial copy became a final installation'
  Assert-Review (!(Test-Path -LiteralPath (Join-Path $env:LOCALAPPDATA 'CodexSessionBridge\client.json'))) 'Failed installation changed pointer'
  Run-Installer
@@ -59,7 +59,7 @@ try {
  $bridgeRejected=$false;try{Run-Installer}catch{$bridgeRejected=$_.Exception.Message -match 'Staged release manifest checksum failed'}
  Remove-Item -LiteralPath Function:\Copy-Item
  Assert-Review $bridgeRejected 'Damaged completion manifest was accepted'
- $bridgeTarget=Join-Path $env:LOCALAPPDATA ('Programs\CodexSessionBridge\versions\0.19.7-'+$bridgeHash)
+ $bridgeTarget=Join-Path $env:LOCALAPPDATA ('Programs\CodexSessionBridge\versions\0.19.8-'+$bridgeHash)
  Assert-Review (!(Test-Path -LiteralPath $bridgeTarget)) 'Damaged manifest reached the final directory'
  Assert-Review (!(Test-Path -LiteralPath (Join-Path $env:LOCALAPPDATA 'CodexSessionBridge\client.json'))) 'Damaged manifest changed the installed pointer'
  Assert-Review (@(Get-ChildItem -LiteralPath (Split-Path $bridgeTarget) -Directory -Force -Filter '.staging-*').Count -eq 1) 'Failed manifest copy was not preserved'
@@ -75,7 +75,7 @@ try {
 
  foreach($bridgeCase in @('legacy','unknown','changed','active','pointed','linked')){
   $env:LOCALAPPDATA=Join-Path $bridgeTestRoot $bridgeCase
-  $script:bridgeTarget=Join-Path $env:LOCALAPPDATA ('Programs\CodexSessionBridge\versions\0.19.7-'+$bridgeHash)
+  $script:bridgeTarget=Join-Path $env:LOCALAPPDATA ('Programs\CodexSessionBridge\versions\0.19.8-'+$bridgeHash)
   New-Item -ItemType Directory -Path (Join-Path $bridgeTarget 'runtime') -Force|Out-Null
   Copy-Item -LiteralPath (Join-Path $bridgeSource 'runtime\node.exe') -Destination (Join-Path $bridgeTarget 'runtime\node.exe')
   $global:bridgeReviewProcesses=if($bridgeCase -eq 'active'){@([pscustomobject]@{ExecutablePath=(Join-Path $bridgeTarget 'runtime\node.exe');CommandLine='fixture'})}else{@()}

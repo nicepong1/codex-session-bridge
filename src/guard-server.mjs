@@ -7,7 +7,9 @@ import {readRoute, GPU_THREAD, UUID} from './guard-policy.mjs';
 export async function startGuardServer({read, threadId = GPU_THREAD, route = (method, params) => readRoute(method, params, threadId), onRequest = () => {}, onClientsChanged = () => {}, onUnsupportedReply = () => {}}) {
   const capabilityPath = '/' + randomBytes(32).toString('hex');
   const server = http.createServer((req, res) => { res.writeHead(404); res.end(); });
-  const wss = new WebSocketServer({noServer: true, maxPayload: 1024 * 1024, perMessageDeflate: false});
+  // 8 MiB of inline images expands to ~10.7 MiB in JSON/base64. Keep a
+  // bounded envelope above that while input policy enforces the decoded limit.
+  const wss = new WebSocketServer({noServer: true, maxPayload: 12 * 1024 * 1024, perMessageDeflate: false});
   server.on('upgrade', (req, socket, head) => {
     if (req.url !== capabilityPath || req.headers.origin || !['127.0.0.1', '::ffff:127.0.0.1'].includes(socket.remoteAddress)) {
       socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n'); return;

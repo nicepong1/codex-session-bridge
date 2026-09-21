@@ -2,6 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {followerTurnInput,loadLocalImages,verifiedInlineImages,MAX_IMAGE_BYTES} from '../src/image-input.mjs';
+import {once} from 'node:events';
+import {WebSocket} from 'ws';
+import {startGuardServer} from '../src/guard-server.mjs';
+import {desktopHubRoute} from '../src/guard-policy.mjs';
 const id='00000000-0000-4000-8000-000000000001';
 const png=Buffer.from('89504e470d0a1a0a01020304','hex');
 const image=bytes=>({mimeType:'image/png',data:bytes.toString('base64'),size:bytes.length,sha256:createHash('sha256').update(bytes).digest('hex'),detail:null});
@@ -27,4 +31,19 @@ test('tampered content, MIME mismatch and aggregate size limits are enforced on 
   const big=Buffer.alloc(MAX_IMAGE_BYTES);png.copy(big);
   assert.equal(verifiedInlineImages([image(big)]).length,1);
   assert.throws(()=>verifiedInlineImages([image(big),valid]),/8MB/);
+});
+test('new-task WebSocket path accepts the full supported image size and still rejects arbitrary execution',async()=>{
+  const big=Buffer.alloc(MAX_IMAGE_BYTES);png.copy(big);
+  const url='data:image/png;base64,'+big.toString('base64');
+  const server=await startGuardServer({route:desktopHubRoute,read:async(method,params)=>
+    method==='initialize'?{}:{imageLength:params.input[1].url.length}});
+  const ws=new WebSocket(server.url);
+  try{
+    await once(ws,'open');let sequence=0;
+    async function call(method,params={}){const response=once(ws,'message');ws.send(JSON.stringify({id:++sequence,method,params}));return JSON.parse((await response)[0])}
+    await call('initialize');
+    const result=await call('turn/start',{threadId:id,clientUserMessageId:id,input:[{type:'text',text:'사진 확인'},{type:'image',url}]});
+    assert.equal(result.result.imageLength,url.length);
+    assert.match((await call('command/exec',{command:'unsafe'})).error.message,/denied/);
+  }finally{ws.terminate();await server.close()}
 });

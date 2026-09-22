@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
+import {createHash} from 'node:crypto';
 import {pathToFileURL} from 'node:url';
 import {loadProfile,dataRoot} from './connection-config.mjs';
 import {sshArguments} from './ssh-command.mjs';
@@ -33,21 +34,23 @@ function supports(matrix,local,host){
 export function updateDecision({currentVersion,local,host,currentMatrix=compatibility,latest}){
  if(!host)return {status:'host-unavailable',canConnect:false,action:'check-host-connection'};
  const ready=host.release===currentVersion&&supports(currentMatrix,local,host);
- if(latest&&newerVersion(latest.version,currentVersion)&&supports(latest.compatibility,local,host))
+ if(latest&&(newerVersion(latest.version,currentVersion)||(latest.version===currentVersion&&host.release!==currentVersion))&&
+    !newerVersion(host.release,latest.version)&&supports(latest.compatibility,local,host))
   return {status:'compatible-update-available',canConnect:ready,action:'prepare-both-pcs',targetVersion:latest.version,releaseUrl:latest.url};
  if(ready)return {status:'ready',canConnect:true,action:'none'};
  const mismatch=host.release!==currentVersion;
  return {status:mismatch?'bridge-version-mismatch':'compatibility-validation-required',canConnect:false,
   action:mismatch?'align-both-pcs':'validate-new-app',releaseUrl:RELEASES_URL};
 }
-async function json(url,{fetcher=fetch,limit=128*1024}={}){
+async function json(url,{fetcher=fetch,limit=128*1024,withHash=false}={}){
  const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),8000);
  try{
   const response=await fetcher(url,{signal:controller.signal,redirect:'error',headers:{Accept:'application/vnd.github+json','User-Agent':'codex-session-bridge-update-check'}});
   if(!response.ok)throw Error('Release lookup HTTP '+response.status);
   if(Number(response.headers.get('content-length'))>limit)throw Error('Release metadata too large');
   const chunks=[];let size=0;for await(const chunk of response.body){size+=chunk.length;if(size>limit)throw Error('Release metadata too large');chunks.push(chunk)}
-  return JSON.parse(Buffer.concat(chunks).toString('utf8'));
+  const bytes=Buffer.concat(chunks),value=JSON.parse(bytes.toString('utf8').replace(/^\uFEFF/,''));
+  return withHash?{value,sha256:createHash('sha256').update(bytes).digest('hex')}:value;
  }finally{clearTimeout(timer)}
 }
 export async function latestPublishedRelease({fetcher=fetch}={}){
@@ -55,9 +58,14 @@ export async function latestPublishedRelease({fetcher=fetch}={}){
  if(value.draft||value.prerelease||!/^v\d+\.\d+\.\d+$/.test(value.tag_name??''))throw Error('Invalid published release');
  const version=value.tag_name.slice(1),url=`https://github.com/${RELEASE_REPOSITORY}/releases/tag/v${version}`;
  if(value.html_url!==url)throw Error('Unexpected release origin');
- // Metadata only. Never execute scripts or install assets returned by this query.
- const matrix=await json(`https://raw.githubusercontent.com/${RELEASE_REPOSITORY}/v${version}/compatibility.json`,{fetcher});
- return {version,url,compatibility:validateReleaseCompatibility(matrix,version)};
+ const matrix=await json(`https://raw.githubusercontent.com/${RELEASE_REPOSITORY}/v${version}/compatibility.json`,{fetcher,withHash:true});
+ const name=`codex-session-bridge-${version}-windows-x64.zip`;
+ const asset=Array.isArray(value.assets)?value.assets.find(a=>a.name===name):null;
+ const expectedUrl=`https://github.com/${RELEASE_REPOSITORY}/releases/download/v${version}/${name}`;
+ const verifiedAsset=asset?.browser_download_url===expectedUrl&&/^sha256:[a-f0-9]{64}$/.test(asset.digest??'')&&
+  Number.isSafeInteger(asset.size)&&asset.size>0&&asset.size<=128*1024*1024?
+  {url:expectedUrl,sha256:asset.digest.slice(7),size:asset.size}:null;
+ return {version,url,compatibility:validateReleaseCompatibility(matrix.value,version),compatibilitySha256:matrix.sha256,asset:verifiedAsset};
 }
 export async function readHostVersions(profile,{run=execute}={}){
  const script="$ErrorActionPreference='Stop';[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false);$h=Get-Content -LiteralPath (Join-Path $env:LOCALAPPDATA 'CodexSessionBridge\\host.json') -Raw|ConvertFrom-Json;$v=@(Get-Process -Name ChatGPT,Codex -ErrorAction SilentlyContinue|ForEach-Object{try{if($_.Path -match 'OpenAI\\.Codex_([\\d.]+)_'){$Matches[1]}}catch{}}|Select-Object -Unique);$installed=@(Get-AppxPackage -Name OpenAI.Codex|ForEach-Object{$_.Version.ToString()});$c=@(Get-ChildItem -LiteralPath (Join-Path $env:LOCALAPPDATA 'OpenAI\\Codex\\bin') -Directory|Sort-Object LastWriteTimeUtc -Descending|Select-Object -First 8|ForEach-Object{$p=Join-Path $_.FullName 'codex.exe';if(Test-Path -LiteralPath $p){(& $p --version)}});@{release=$h.release;appVersions=$v;installedAppVersions=$installed;cliVersions=$c}|ConvertTo-Json -Compress";

@@ -2,10 +2,14 @@ param([string]$ProfileId)
 $ErrorActionPreference='Stop'
 Add-Type -AssemblyName System.Windows.Forms
 . (Join-Path $PSScriptRoot 'src\desktop-launcher.ps1')
+. (Join-Path $PSScriptRoot 'src\launcher-install.ps1')
 $bridgeData=Join-Path $env:LOCALAPPDATA 'CodexSessionBridge'
 if($env:CSB_DATA_HOME){$bridgeData=$env:CSB_DATA_HOME}
 $bridgeLock=$null
 try {
+  # Old version-specific shortcuts follow the current pointer before any launch check.
+  $bridgeRoot=Resolve-BridgeLauncherInstallation -Fallback $PSScriptRoot -Data $bridgeData
+  if($bridgeRoot -ne $PSScriptRoot){& (Join-Path $bridgeRoot 'Open-Bridge.ps1') -ProfileId $ProfileId;return}
   if(!$ProfileId){
     $bridgeSelected=Join-Path $bridgeData 'selected.json'
     if(!(Test-Path -LiteralPath $bridgeSelected)){
@@ -27,9 +31,18 @@ try {
     return
   }
   New-Item -ItemType Directory -Path (Join-Path $bridgeState 'reports') -Force|Out-Null
+  # This path runs once per new window under the launch mutex, never on window focus.
+  $bridgeUpdateResult=Join-Path $bridgeState ('reports\launch-update-'+[Guid]::NewGuid().ToString()+'.json')
+  & (Join-Path $bridgeRoot 'runtime\node.exe') (Join-Path $bridgeRoot 'src\launch-update.mjs') --result $bridgeUpdateResult
+  if(!(Test-Path -LiteralPath $bridgeUpdateResult)){throw 'Update check could not finish. Run Check-Updates.cmd.'}
+  $bridgeUpdate=Get-Content -LiteralPath $bridgeUpdateResult -Raw -Encoding UTF8|ConvertFrom-Json
+  if(!$bridgeUpdate.ok){throw $bridgeUpdate.message}
+  $bridgeRoot=Resolve-BridgeLauncherInstallation -Fallback $bridgeRoot -Data $bridgeData
+  if($bridgeRoot -ne $bridgeUpdate.installationRoot){throw 'Installation changed while opening. Open the icon again.'}
+  . (Join-Path $bridgeRoot 'src\desktop-launcher.ps1')
   $bridgeReport='reports/hub-'+[Guid]::NewGuid().ToString()+'.json'
-  $bridgeNode=Join-Path $PSScriptRoot 'runtime\node.exe'
-  $bridgeEntry=(Join-Path $PSScriptRoot 'src\desktop-hub.mjs').Replace('\','/')
+  $bridgeNode=Join-Path $bridgeRoot 'runtime\node.exe'
+  $bridgeEntry=(Join-Path $bridgeRoot 'src\desktop-hub.mjs').Replace('\','/')
   $bridgeLog=Join-Path $bridgeState 'reports\launch-error.txt'
   $bridgeProcess=Start-Process -FilePath $bridgeNode -ArgumentList @(('"'+$bridgeEntry+'"'),'--report',$bridgeReport,'--seconds','0','--launch','--enable-text-input') -WorkingDirectory $bridgeState -WindowStyle Hidden -PassThru -RedirectStandardError $bridgeLog
   $bridgeDeadline=[DateTime]::UtcNow.AddSeconds(55)

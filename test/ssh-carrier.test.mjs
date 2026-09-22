@@ -12,7 +12,7 @@ test('native remote carrier preserves full-duplex Unicode bytes and closes on st
  t.after(()=>{const resolved=path.resolve(root);assert.ok(resolved.startsWith(path.resolve(os.tmpdir())+path.sep));assert.match(path.basename(resolved),/^csb-wire-/);fs.rmSync(resolved,{recursive:true,force:true})});
  fs.mkdirSync(path.join(root,'runtime'));fs.mkdirSync(path.join(root,'src'));
  fs.copyFileSync(process.execPath,path.join(root,'runtime','node.exe'));
- fs.writeFileSync(path.join(root,'package.json'),JSON.stringify({version:'0.19.9',type:'module'}));
+ fs.writeFileSync(path.join(root,'package.json'),JSON.stringify({version:'0.19.10',type:'module'}));
  fs.writeFileSync(path.join(root,'src','host-doctor.mjs'),"process.stdin.on('data',data=>process.stdout.write(data));process.stdin.on('end',()=>process.exit(0));");
  const p={version:1,id:randomUUID(),label:'Carrier test',hostname:'192.0.2.10',username:'example',port:22,identityFile:'',remoteInstallPath:root};
  const command=remoteNodeCommand(p,'host-doctor.mjs'),inner=command.slice('cmd.exe /d /v:off /s /c '.length);

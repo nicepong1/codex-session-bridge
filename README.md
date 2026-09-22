@@ -6,7 +6,7 @@
 
 > 독립적으로 개발한 실험적 도구입니다. OpenAI 공식 제품이 아니며, Codex 데스크톱의 비공개 연결 규약을 사용합니다. 현재 검증한 Windows 앱 버전만 지원합니다. 설치 전 [호환성 표](docs/COMPATIBILITY.md)를 확인하세요.
 
-**[설치 파일 다운로드](https://github.com/nicepong1/codex-session-bridge/releases/tag/v0.19.9)** · **[사용설명서](docs/USER-GUIDE.md)** · **[문제 해결](docs/TROUBLESHOOTING.md)** · **[앱 개요와 구조](docs/OVERVIEW.md)**
+**[설치 파일 다운로드](https://github.com/nicepong1/codex-session-bridge/releases/tag/v0.19.10)** · **[사용설명서](docs/USER-GUIDE.md)** · **[문제 해결](docs/TROUBLESHOOTING.md)** · **[앱 개요와 구조](docs/OVERVIEW.md)**
 
 ## 할 수 있는 일
 
@@ -19,7 +19,7 @@
 - SSH 연결이 끊어졌을 때 재연결, 결과가 불확실한 입력·승인의 자동 재전송 방지
 - 사용자별 설치, 여러 호스트 설정 저장, 설정·최근 작업·로그를 호스트별로 분리
 - SSH 서버 지문 확인 및 Codex 버전 검사, 바탕 화면 바로가기
-- `Check-Updates.cmd`로 양쪽 앱·CLI·브리지와 최신 정식 릴리스 비교. [업데이트 점검과 자동화](docs/UPDATES.md)
+- 새 연결 창을 열 때 한 번 업데이트 점검, 호환되는 브리지를 검증 후 양쪽에 적용. `Check-Updates.cmd`는 읽기 전용 진단. [업데이트 동작](docs/UPDATES.md)
 
 ## 빠른 시작
 
@@ -33,7 +33,7 @@ Node.js와 JavaScript 의존성은 릴리스 ZIP에 포함됩니다. Codex, Tail
 
 ## 지원 범위
 
-| 항목 | 릴리스 0.19.9 |
+| 항목 | 릴리스 0.19.10 |
 |---|---|
 | 노트북/호스트 OS | Windows x64 |
 | 노트북 Codex 앱 | 26.901.5280.0, 26.901.6511.0, 26.908.4834.0, 26.908.9136.0, 26.915.4065.0, 26.917.6896.0 |

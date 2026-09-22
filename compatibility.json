@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "bridgeVersion": "0.19.9",
+  "bridgeVersion": "0.19.10",
   "platform": "win32",
   "architecture": "x64",
   "clientAppVersions": [

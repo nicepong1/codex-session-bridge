@@ -20,6 +20,10 @@ test('a failed remote release lookup never disables a previously compatible pair
  assert.equal(updateDecision({...base,host:{...host,release:'1.2.2'}}).status,'bridge-version-mismatch');
  assert.equal(updateDecision({...base,local:{versions:['99.0.0.0']}}).canConnect,false);
 });
+test('recover an interrupted pair on the current release, but never downgrade a newer host',()=>{
+ assert.equal(updateDecision({...base,currentVersion:next,latest}).status,'compatible-update-available');
+ assert.equal(updateDecision({...base,latest,host:{...host,release:'1.2.5'}}).status,'bridge-version-mismatch');
+});
 test('release metadata rejects invalid platform, role lists and mismatched release tags',()=>{
  assert.equal(validateReleaseCompatibility(matrix,next),matrix);
  for(const value of [{...matrix,bridgeVersion:old},{...matrix,platform:'linux'},{...matrix,unknownVersionPolicy:'allow'},{...matrix,clientAppVersions:['*']},{...matrix,hostCliVersions:[]}])assert.throws(()=>validateReleaseCompatibility(value,next));
@@ -36,6 +40,14 @@ test('latest lookup is confined to the fixed release repository and validates ta
 test('release lookup is bounded and treats network errors as unknown, not up to date',async()=>{
  await assert.rejects(latestPublishedRelease({fetcher:async()=>new Response('x'.repeat(140000))}),/too large/);
  await assert.rejects(latestPublishedRelease({fetcher:async()=>new Response('',{status:503})}),/HTTP 503/);
+});
+test('automatic assets require exact repository URL, bounded size and GitHub SHA256',async()=>{
+ const asset={name:`codex-session-bridge-${next}-windows-x64.zip`,browser_download_url:`https://github.com/nicepong1/codex-session-bridge/releases/download/v${next}/codex-session-bridge-${next}-windows-x64.zip`,digest:'sha256:'+'a'.repeat(64),size:100};
+ const release={draft:false,prerelease:false,tag_name:'v'+next,html_url:latest.url,assets:[asset]};
+ const result=await latestPublishedRelease(mockFetch(release));assert.equal(result.asset.sha256,'a'.repeat(64));assert.match(result.compatibilitySha256,/^[a-f0-9]{64}$/);
+ for(const change of [{digest:null},{browser_download_url:'https://attacker.invalid/file.zip'},{size:129*1024*1024}]){
+  assert.equal((await latestPublishedRelease(mockFetch({...release,assets:[{...asset,...change}]}))).asset,null);
+ }
 });
 test('host query remains read-only and uses the saved SSH trust',async()=>{
  const profile={version:1,id:'00000000-0000-4000-8000-000000000001',label:'fixture',hostname:'192.0.2.1',username:'tester',port:22};

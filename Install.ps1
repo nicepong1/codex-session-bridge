@@ -1,4 +1,4 @@
-param([ValidateSet('Client','Host','Both')][string]$Role,[switch]$NoConfigure,[switch]$NoShortcut)
+param([ValidateSet('Client','Host','Both')][string]$Role,[switch]$NoConfigure,[switch]$NoShortcut,[switch]$StageOnly)
 $ErrorActionPreference='Stop'
 if(![Environment]::Is64BitOperatingSystem){throw 'Windows x64 is required.'}
 # OneDrive placeholders are reparse points but do not redirect the file name.
@@ -40,7 +40,7 @@ if(!$Role){
 $bridgeManifestPath=Join-Path $PSScriptRoot 'release-files.json'
 if(!(Test-Path -LiteralPath $bridgeManifestPath)){throw 'Use the release ZIP from GitHub, or run scripts/Build-Release.ps1 first.'}
 $bridgeManifest=Get-Content -LiteralPath $bridgeManifestPath -Raw|ConvertFrom-Json
-if($bridgeManifest.version -ne '0.19.9' -or !$bridgeManifest.files){throw 'Invalid release manifest'}
+if($bridgeManifest.version -ne '0.19.10' -or !$bridgeManifest.files){throw 'Invalid release manifest'}
 $bridgeFiles=@($bridgeManifest.files)
 $bridgeSeen=@{}
 foreach($bridgeFile in $bridgeFiles){
@@ -61,9 +61,10 @@ try{$bridgeOwnsInstallerLock=$bridgeInstallerLock.WaitOne(0)}catch [Threading.Ab
 if(!$bridgeOwnsInstallerLock){throw 'Another installer is running for this Windows user.'}
 $bridgeHash=(Get-FileHash -LiteralPath $bridgeManifestPath -Algorithm SHA256).Hash.Substring(0,12).ToLowerInvariant()
 $bridgeInstallBase=Join-Path $env:LOCALAPPDATA 'Programs\CodexSessionBridge'
-$bridgeInstall=Join-Path $bridgeInstallBase ('versions\0.19.9-'+$bridgeHash)
+$bridgeInstall=Join-Path $bridgeInstallBase ('versions\0.19.10-'+$bridgeHash)
 $bridgeData=Join-Path $env:LOCALAPPDATA 'CodexSessionBridge'
 Install-BridgeFiles -Source $PSScriptRoot -Destination $bridgeInstall -Files $bridgeFiles -DataDirectory $bridgeData
+if($StageOnly){return}
 New-Item -ItemType Directory -Path $bridgeData -Force|Out-Null
 if($Role -eq 'Host' -or $Role -eq 'Both'){
   Save-BridgeInstallPointer (Join-Path $bridgeData 'host.json') $bridgeInstall

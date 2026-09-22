@@ -26,6 +26,9 @@ foreach($bridgeDirectory in @('src','diagnostics','docs','assets')){Copy-Item -L
 New-Item -ItemType Directory -Path (Join-Path $bridgeStage 'bin') -Force|Out-Null
 Copy-Item -LiteralPath (Join-Path $bridgeRoot 'bin\codex-gpu-guard.exe') -Destination (Join-Path $bridgeStage 'bin\codex-gpu-guard.exe')
 foreach($bridgeFile in @('Install.cmd','Install.ps1','Open-Bridge.ps1','Configure.cmd','Diagnose.cmd','Check-Updates.cmd','Show-HostInfo.cmd','Show-HostInfo.ps1','Uninstall.ps1','README.md','LICENSE','THIRD-PARTY-NOTICES.md','package.json','package-lock.json','compatibility.json')){Copy-Item -LiteralPath (Join-Path $bridgeRoot $bridgeFile) -Destination (Join-Path $bridgeStage $bridgeFile)}
+# The updater compares this file with the tagged GitHub blob, whose line endings are LF.
+$bridgeMatrix=Join-Path $bridgeStage 'compatibility.json'
+[IO.File]::WriteAllText($bridgeMatrix,[IO.File]::ReadAllText($bridgeMatrix).Replace("`r`n","`n"),[Text.UTF8Encoding]::new($false))
 New-Item -ItemType Directory -Path (Join-Path $bridgeStage 'runtime'),(Join-Path $bridgeStage 'node_modules') -Force|Out-Null
 Copy-Item -LiteralPath $bridgeNode -Destination (Join-Path $bridgeStage 'runtime\node.exe')
 Copy-Item -LiteralPath (Join-Path $bridgeNodeRoot 'LICENSE') -Destination (Join-Path $bridgeStage 'runtime\NODE-LICENSE.txt')

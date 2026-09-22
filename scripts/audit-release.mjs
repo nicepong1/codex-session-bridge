@@ -4,7 +4,7 @@ import {fileURLToPath} from 'node:url';
 const stageAt=process.argv.indexOf('--stage'),staged=stageAt>=0;
 const root=staged?path.resolve(process.argv[stageAt+1]):fileURLToPath(new URL('..',import.meta.url));
 const roots=new Set(['src','diagnostics','docs','test','assets','scripts','.github']);
-const top=new Set(['.gitignore','package.json','package-lock.json','README.md','LICENSE','THIRD-PARTY-NOTICES.md','compatibility.json','Install.cmd','Install.ps1','Open-Bridge.ps1','Configure.cmd','Diagnose.cmd','Show-HostInfo.cmd','Show-HostInfo.ps1','Uninstall.ps1','Build-Guard.ps1','CHANGELOG.md','CONTRIBUTING.md','SECURITY.md','release-files.json']);
+const top=new Set(['.gitignore','package.json','package-lock.json','README.md','LICENSE','THIRD-PARTY-NOTICES.md','compatibility.json','Install.cmd','Install.ps1','Open-Bridge.ps1','Configure.cmd','Diagnose.cmd','Check-Updates.cmd','Show-HostInfo.cmd','Show-HostInfo.ps1','Uninstall.ps1','Build-Guard.ps1','CHANGELOG.md','CONTRIBUTING.md','SECURITY.md','release-files.json']);
 const allowedDiagnostics=new Set(['observe-session.mjs','drop-ack-proxy.mjs','fake-desktop.mjs']);
 const errors=[];let count=0;
 function walk(dir){for(const entry of fs.readdirSync(dir,{withFileTypes:true})){

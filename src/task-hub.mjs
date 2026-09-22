@@ -449,8 +449,28 @@ export class TaskHub extends EventEmitter {
   async discover(request) {
     const id = request?.params?.conversationId;
     if (!this.knownIds.has(id) && !this.tasks.has(id)) return false;
+    if (this.closed || this.archivedIds.has(id) || !UUID.test(id ?? '') || !new NativeViewPolicy(id).matches(request)) return false;
     if (request?.method !== 'thread-owner-discovery' || request.version !== 1) return this.tasks.get(id)?.policy.canHandle(request) ?? false;
+    // Claim only a known GPU task on an explicit owner lookup. Waiting for a
+    // cold GPU view in discovery can exhaust the desktop's discovery deadline
+    // and send it down the local-resume path. The owner response below still
+    // requires a real, fresh GPU snapshot before it acknowledges ownership.
+    if (this.allowActivation && this.connection.online && !this.tasks.get(id)?.blocked) {
+      this.prepare(id, {activate: true}).catch(() => {});
+      return true;
+    }
     try { const task = await this.prepare(id); return task.policy.canHandle(request); } catch { return false; }
+  }
+  async ownerResponse(request, clientId) {
+    const base = {type:'response',requestId:request.requestId,method:request.method,handledByClientId:clientId};
+    const id = request?.params?.conversationId;
+    try {
+      if (request.method !== 'thread-owner-discovery' || request.version !== 1 ||
+          !UUID.test(id ?? '') || !new NativeViewPolicy(id).matches(request) ||
+          (!this.knownIds.has(id) && !this.tasks.has(id))) throw Error('Unknown GPU task');
+      const task = await this.prepare(id, {activate:this.allowActivation});
+      return task.policy.handleRequest(request, clientId);
+    } catch(error) { return {...base,resultType:'error',error:error.message}; }
   }
   async updateModel(id, selection, {condition = null} = {}) {
     const settings = modelSettings(selection), expected = modelCondition(condition), task = this.tasks.get(id);

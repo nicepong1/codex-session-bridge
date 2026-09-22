@@ -31,6 +31,36 @@ class FakeConnection extends EventEmitter {
 function setup(t) { const connection = new FakeConnection(), hub = new TaskHub({createConnection: () => connection}); t.after(() => hub.close()); return {hub, connection}; }
 function following(id, value = true) { return {method: 'thread-stream-following-changed', version: 1, sourceClientId: 'notebook', params: {hostId: 'local', conversationId: id, following: value}}; }
 
+test('cold owner lookup responds to discovery immediately but acknowledges only a live GPU snapshot',async t=>{
+ const connection=new FakeConnection();let release;
+ connection.request=async(method,params)=>{connection.calls.push({method,params});return new Promise(resolve=>{release=()=>resolve(snapshot(params.threadId))})};
+ const hub=new TaskHub({createConnection:()=>connection,allowActivation:true});t.after(()=>hub.close());hub.knownIds.add(GPU_THREAD);
+ const request={requestId:'lookup',method:'thread-owner-discovery',version:1,params:{hostId:'local',conversationId:GPU_THREAD}};
+ assert.equal(await hub.discover(request),true);
+ let acknowledged=false;const response=hub.ownerResponse(request,'proxy').then(r=>{acknowledged=true;return r});
+ await new Promise(resolve=>setImmediate(resolve));assert.equal(acknowledged,false);assert.equal(connection.calls.length,1);
+ assert.equal(connection.calls[0].method,'activate');release();
+ assert.equal((await response).resultType,'success');assert.equal(hub.tasks.get(GPU_THREAD).policy.owner,'owner-'+GPU_THREAD);
+ assert.equal(connection.calls.some(c=>['submitText','createTask'].includes(c.method)),false);
+});
+test('owner preflight refuses unknown, archived, foreign-host and changed-owner tasks without starting them',async t=>{
+ const connection=new FakeConnection(),hub=new TaskHub({createConnection:()=>connection,allowActivation:true});t.after(()=>hub.close());
+ const request={requestId:'lookup',method:'thread-owner-discovery',version:1,params:{hostId:'local',conversationId:GPU_THREAD}};
+ assert.equal(await hub.discover(request),false);assert.equal((await hub.ownerResponse(request,'proxy')).resultType,'error');
+ hub.knownIds.add(GPU_THREAD);assert.equal(await hub.discover({...request,hostId:'other'}),false);
+ assert.equal(await hub.discover({...request,params:{...request.params,hostId:'other'}}),false);
+ hub.archivedIds.add(GPU_THREAD);assert.equal(await hub.discover(request),false);assert.equal((await hub.ownerResponse(request,'proxy')).resultType,'error');
+ hub.archivedIds.clear();hub.task(GPU_THREAD).blocked=true;
+ assert.equal(await hub.discover(request),false);assert.equal((await hub.ownerResponse(request,'proxy')).resultType,'error');assert.equal(connection.calls.length,0);
+});
+test('failed GPU activation returns an owner error without a local resume or optimistic acknowledgement',async t=>{
+ const connection=new FakeConnection();connection.request=async()=>{throw Error('GPU offline')};
+ const hub=new TaskHub({createConnection:()=>connection,allowActivation:true});t.after(()=>hub.close());hub.knownIds.add(GPU_THREAD);
+ const request={method:'thread-owner-discovery',version:1,params:{conversationId:GPU_THREAD}};
+ assert.equal(await hub.discover(request),true);const response=await hub.ownerResponse(request,'proxy');
+ assert.equal(response.resultType,'error');assert.equal(response.error,'GPU offline');assert.equal(hub.tasks.get(GPU_THREAD).policy.online,false);
+});
+
 test('first recent page returns without a full catalog scan; background ordering later projects stable metadata', async t => {
   const connection = new FakeConnection(), history = new FakeConnection();
   const hub = new TaskHub({createConnection: () => connection, createHistoryConnection: () => history,

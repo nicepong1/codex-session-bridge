@@ -48,6 +48,8 @@ test('compatibility blocks unknown, ambiguous and wrong-role builds',()=>{
  assert.equal(desktopFromPaths(app('26.908.9136.0'),'client').testedBuild,true);
  assert.equal(desktopFromPaths(app('26.908.4834.0'),'host').testedBuild,true);
  assert.equal(desktopFromPaths(app('26.915.4065.0'),'host').testedBuild,true);
+ assert.equal(desktopFromPaths(app('26.917.6896.0'),'client').testedBuild,true);
+ assert.equal(desktopFromPaths(app('26.917.6896.0'),'host').testedBuild,false);
  assert.equal(desktopFromPaths(app('26.908.9136.0'),'host').testedBuild,false);
  assert.equal(desktopFromPaths(app('99.1.1.0'),'client').testedBuild,false);
  assert.equal(desktopFromPaths([app('26.901.6511.0'),app('26.901.5280.0')]).testedBuild,false);

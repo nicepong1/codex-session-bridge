@@ -111,7 +111,7 @@ async function respond(message) {
   const task = hub.tasks.get(message.params?.conversationId);
   const base = {type: 'response', requestId: message.requestId, method: message.method, handledByClientId: clientId};
   if (message.method === 'thread-owner-discovery') {
-    send(task ? task.policy.handleRequest(message, clientId) : {...base, resultType: 'error', error: 'Unknown GPU task'}); return;
+    send(await hub.ownerResponse(message, clientId)); return;
   }
   try {
     if (!canWrite(task)) throw new Error('GPU에서 이 작업을 열고 연결될 때까지 기다려 주세요');

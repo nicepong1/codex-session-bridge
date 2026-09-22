@@ -25,7 +25,7 @@ New-Item -ItemType Directory -Path $bridgeStage -Force|Out-Null
 foreach($bridgeDirectory in @('src','diagnostics','docs','assets')){Copy-Item -LiteralPath (Join-Path $bridgeRoot $bridgeDirectory) -Destination (Join-Path $bridgeStage $bridgeDirectory) -Recurse}
 New-Item -ItemType Directory -Path (Join-Path $bridgeStage 'bin') -Force|Out-Null
 Copy-Item -LiteralPath (Join-Path $bridgeRoot 'bin\codex-gpu-guard.exe') -Destination (Join-Path $bridgeStage 'bin\codex-gpu-guard.exe')
-foreach($bridgeFile in @('Install.cmd','Install.ps1','Open-Bridge.ps1','Configure.cmd','Diagnose.cmd','Show-HostInfo.cmd','Show-HostInfo.ps1','Uninstall.ps1','README.md','LICENSE','THIRD-PARTY-NOTICES.md','package.json','package-lock.json','compatibility.json')){Copy-Item -LiteralPath (Join-Path $bridgeRoot $bridgeFile) -Destination (Join-Path $bridgeStage $bridgeFile)}
+foreach($bridgeFile in @('Install.cmd','Install.ps1','Open-Bridge.ps1','Configure.cmd','Diagnose.cmd','Check-Updates.cmd','Show-HostInfo.cmd','Show-HostInfo.ps1','Uninstall.ps1','README.md','LICENSE','THIRD-PARTY-NOTICES.md','package.json','package-lock.json','compatibility.json')){Copy-Item -LiteralPath (Join-Path $bridgeRoot $bridgeFile) -Destination (Join-Path $bridgeStage $bridgeFile)}
 New-Item -ItemType Directory -Path (Join-Path $bridgeStage 'runtime'),(Join-Path $bridgeStage 'node_modules') -Force|Out-Null
 Copy-Item -LiteralPath $bridgeNode -Destination (Join-Path $bridgeStage 'runtime\node.exe')
 Copy-Item -LiteralPath (Join-Path $bridgeNodeRoot 'LICENSE') -Destination (Join-Path $bridgeStage 'runtime\NODE-LICENSE.txt')
